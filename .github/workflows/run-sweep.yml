@@ -543,7 +543,8 @@ jobs:
             decode-additional-settings: ${{ toJson(matrix.config.decode.additional-settings) }}
             conc: ${{ matrix.config.conc }}
             duration: ${{ matrix.config.duration }}
-            offloading: ${{ matrix.config.offloading }}
+            kv-offloading: ${{ matrix.config['kv-offloading'] }}
+            kv-offload-backend: ${{ matrix.config['kv-offload-backend'] }}
             run-eval: false
             scenario-type: agentic-coding
 
