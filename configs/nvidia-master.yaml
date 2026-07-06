@@ -1778,10 +1778,10 @@ dsv4-fp4-b200-vllm-agentic:
       - { tp: 8, kv-offloading: none,  conc-list: [1, 2, 3, 4, 5] }
       # Sample the useful MooncakeStore range without repeating its collapsed
       # high-concurrency tail.
-      - { tp: 8, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [8, 10, 16] }
-      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: none,  conc-list: [16, 32, 38, 44, 50] }
+      - { tp: 8, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [8, 10, 16], kv-transfer: { name: mooncake, version: "0.3.11.post1" } }
+      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: none,  conc-list: [16, 32, 38, 44, 50], router: { name: vllm-router, version: "0.1.14" } }
       # Retain the external-cache transition and peak-throughput region.
-      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [16, 38, 44, 56, 64, 66, 68] }
+      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [16, 38, 44, 56, 64, 66, 68], router: { name: vllm-router, version: "0.1.14" }, kv-transfer: { name: mooncake, version: "0.3.11.post1" } }
 
 
 dsv4-fp4-b200-trt:
@@ -2340,6 +2340,7 @@ glm5-fp4-gb300-dynamo-trt:
   runner: gb300-nv
   precision: fp4
   framework: dynamo-trt
+  kv-transfer: { name: nixl, version: "0.9.0" }
   multinode: true
   disagg: true
   scenarios:
@@ -2813,7 +2814,7 @@ kimik2.5-int4-b200-vllm-agentic:
     - dram-utilization: 0.80
       search-space:
       - { tp: 8, kv-offloading: none, conc-list: [1, 2, 4, 8, 16, 32] }
-      - { tp: 8, kv-offloading: dram, kv-offload-backend: native, conc-list: [32, 64, 96, 128] }
+      - { tp: 8, kv-offloading: dram, kv-offload-backend: native, conc-list: [32, 64, 96, 128], kv-transfer: { name: SimpleCPUOffloadConnector, version: "0.22.0" } }
 
 
 kimik2.5-int4-b300-vllm:
@@ -2869,7 +2870,7 @@ kimik2.5-int4-h200-vllm-agentic:
     - dram-utilization: 0.80
       search-space:
       - { tp: 8, kv-offloading: none, conc-list: [1, 2, 3, 4, 5, 6, 7] }
-      - { tp: 8, kv-offloading: dram, kv-offload-backend: native, conc-list: [6, 7, 8, 9, 10, 11, 12, 13, 14] }
+      - { tp: 8, kv-offloading: dram, kv-offload-backend: native, conc-list: [6, 7, 8, 9, 10, 11, 12, 13, 14], kv-transfer: { name: SimpleCPUOffloadConnector, version: "0.22.0" } }
 
 
 # NOTE: At the time of submission, https://docs.vllm.ai/projects/recipes/en/latest/moonshotai/Kimi-K2.5.html
@@ -2982,7 +2983,7 @@ kimik2.5-fp4-b300-vllm-agentic:
     - dram-utilization: 0.80
       search-space:
       - { tp: 8, ep: 1, kv-offloading: none, conc-list: [1, 2, 4, 8, 16, 32, 40, 48, 56, 64] }
-      - { tp: 8, ep: 1, kv-offloading: dram, kv-offload-backend: native, conc-list: [1, 2, 4, 8, 16, 32, 40, 48, 56, 64] }
+      - { tp: 8, ep: 1, kv-offloading: dram, kv-offload-backend: native, conc-list: [1, 2, 4, 8, 16, 32, 40, 48, 56, 64], kv-transfer: { name: SimpleCPUOffloadConnector, version: "0.22.0" } }
 
 
 dsr1-fp8-b200-trt:
@@ -3228,14 +3229,14 @@ dsv4-fp4-b300-vllm-agentic:
       search-space:
       # Compare native GPU-cache and MooncakeStore CPU-offload cliffs.
       - { tp: 4, kv-offloading: none,  conc-list: [1, 2, 4, 6, 8, 16] }
-      - { tp: 4, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [16, 18, 20, 24] }
+      - { tp: 4, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [16, 18, 20, 24], kv-transfer: { name: mooncake, version: "0.3.11.post1" } }
       # TP8 remains cache-resident through conc 52.
       - { tp: 8, kv-offloading: none,  conc-list: [1, 2, 4, 6, 8, 16, 32, 40, 48, 52] }
-      - { tp: 8, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [52] }
-      - { tp: 4, ep: 4, dp-attn: true, kv-offloading: none,  conc-list: [8, 16] }
-      - { tp: 4, ep: 4, dp-attn: true, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [32] }
+      - { tp: 8, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [52], kv-transfer: { name: mooncake, version: "0.3.11.post1" } }
+      - { tp: 4, ep: 4, dp-attn: true, kv-offloading: none,  conc-list: [8, 16], router: { name: vllm-router, version: "0.1.14" } }
+      - { tp: 4, ep: 4, dp-attn: true, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [32], router: { name: vllm-router, version: "0.1.14" }, kv-transfer: { name: mooncake, version: "0.3.11.post1" } }
       # TP8 DEP retains representative low, peak, and transition points.
-      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: none,  conc-list: [52, 72, 100, 128, 144] }
+      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: none,  conc-list: [52, 72, 100, 128, 144], router: { name: vllm-router, version: "0.1.14" } }
 
 
 dsv4-fp4-b300-trt:
@@ -6440,6 +6441,7 @@ dsr1-fp8-gb300-dynamo-trt:
   runner: gb300-nv
   precision: fp8
   framework: dynamo-trt
+  kv-transfer: { name: nixl, version: "0.9.0" }
   multinode: true
   disagg: true
   scenarios:
@@ -8052,6 +8054,7 @@ kimik2.5-fp4-gb200-dynamo-trt:
   runner: gb200
   precision: fp4
   framework: dynamo-trt
+  kv-transfer: { name: nixl, version: "0.9.0" }
   multinode: true
   disagg: true
   scenarios:
@@ -8423,6 +8426,7 @@ kimik2.5-fp4-gb300-dynamo-trt:
   runner: gb300
   precision: fp4
   framework: dynamo-trt
+  kv-transfer: { name: nixl, version: "0.9.0" }
   multinode: true
   disagg: true
   scenarios:
@@ -9671,6 +9675,7 @@ dsv4-fp4-gb300-dynamo-trt:
   runner: gb300-nv
   precision: fp4
   framework: dynamo-trt
+  kv-transfer: { name: nixl, version: "0.9.0" }
   multinode: true
   disagg: true
   scenarios:
@@ -10067,6 +10072,7 @@ dsv4-fp4-gb300-dynamo-trt-mtp:
   runner: gb300-nv
   precision: fp4
   framework: dynamo-trt
+  kv-transfer: { name: nixl, version: "0.9.0" }
   multinode: true
   disagg: true
   scenarios:
@@ -10963,7 +10969,7 @@ kimik2.5-int4-h100-vllm:
     - dram-utilization: 0.80
       search-space:
       - { tp: 8, kv-offloading: none, conc-list: [1, 2, 4, 8, 12, 16, 20] }
-      - { tp: 8, kv-offloading: dram, kv-offload-backend: native, conc-list: [1, 2, 4, 8, 12, 16, 20] }
+      - { tp: 8, kv-offloading: dram, kv-offload-backend: native, conc-list: [1, 2, 4, 8, 12, 16, 20], kv-transfer: { name: SimpleCPUOffloadConnector, version: "0.22.0" } }
 
 
 qwen3.5-fp8-h100-sglang:
@@ -11024,6 +11030,7 @@ qwen3.5-fp4-gb300-dynamo-sglang:
       # Pure tensor parallel (STP), 8k1k baseline-low-latency sweep.
       # Total: 8 GB300 GPUs.
       - spec-decoding: "none"
+        kv-transfer: { name: mooncake, version: "0.3.11.post1" }
         conc-list: [1, 4, 8, 16, 32, 64, 256]
         prefill:
           num-worker: 1
@@ -11056,6 +11063,7 @@ qwen3.5-fp4-gb300-dynamo-sglang:
       # 6P1D wide-EP: 6 prefill workers @ DEP4 + 1 decode worker @ DEP16.
       # Mooncake transfer. Total: 40 GB300 GPUs (6*4 + 4*4).
       - spec-decoding: "none"
+        kv-transfer: { name: mooncake, version: "0.3.11.post1" }
         conc-list: [5120]
         prefill:
           num-worker: 6
@@ -11072,6 +11080,7 @@ qwen3.5-fp4-gb300-dynamo-sglang:
       # 7P1D wide-EP: 7 prefill workers @ DEP4 + 1 decode worker @ DEP16.
       # Mooncake transfer. Total: 44 GB300 GPUs (7*4 + 4*4).
       - spec-decoding: "none"
+        kv-transfer: { name: mooncake, version: "0.3.11.post1" }
         conc-list: [5120]
         prefill:
           num-worker: 7
@@ -11526,7 +11535,7 @@ qwen3.5-fp8-b300-sglang-agentic-hicache:
     - dram-utilization: 0.80
       search-space:
       - { tp: 4, ep: 1, kv-offloading: none, conc-list: [1, 2, 4, 8, 16, 32] }
-      - { tp: 4, ep: 1, kv-offloading: dram, kv-offload-backend: hicache, conc-list: [16, 32, 48, 64] }
+      - { tp: 4, ep: 1, kv-offloading: dram, kv-offload-backend: hicache, conc-list: [16, 32, 48, 64], kv-transfer: { name: hicache, version: "425dffbd" } }
 
 
 kimik2.5-fp4-b200-vllm-agentic-lmcache:
@@ -11630,7 +11639,7 @@ qwen3.5-fp8-h100-sglang-agentic:
     - dram-utilization: 0.80
       search-space:
       - { tp: 8, ep: 8, kv-offloading: none,    conc-list: [1, 2, 4, 8, 12, 14, 16] }
-      - { tp: 8, ep: 8, kv-offloading: dram, kv-offload-backend: hicache, conc-list: [12, 14, 16, 20, 24, 28, 32, 42] }
+      - { tp: 8, ep: 8, kv-offloading: dram, kv-offload-backend: hicache, conc-list: [12, 14, 16, 20, 24, 28, 32, 42], kv-transfer: { name: hicache, version: "0.5.12" } }
 
 
 # MiniMax-M3 NVFP4 disagg sweep on the same B300 topology matrix as the MXFP8
@@ -13086,8 +13095,8 @@ minimaxm3-fp8-h100-vllm-agentic:
       search-space:
       - { tp: 8, kv-offloading: none, conc-list: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16] }
       - { tp: 8, ep: 8, kv-offloading: none, conc-list: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16] }
-      - { tp: 8, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16] }
-      - { tp: 8, ep: 8, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16] }
+      - { tp: 8, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16], kv-transfer: { name: mooncake, version: "0.3.11.post1" } }
+      - { tp: 8, ep: 8, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16], kv-transfer: { name: mooncake, version: "0.3.11.post1" } }
 
 
 minimaxm3-fp8-h200-vllm-agentic:
@@ -13108,7 +13117,7 @@ minimaxm3-fp8-h200-vllm-agentic:
       search-space:
       - { tp: 8, kv-offloading: none, conc-list: [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20] }
       - { tp: 8, ep: 8, kv-offloading: none, conc-list: [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20] }
-      - { tp: 8, ep: 8, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20] }
+      - { tp: 8, ep: 8, kv-offloading: dram, kv-offload-backend: mooncake, conc-list: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20], kv-transfer: { name: mooncake, version: "0.3.11.post1" } }
 
 
 
@@ -13125,11 +13134,11 @@ dsv4-fp4-b200-sglang-agentic-hicache:
     - dram-utilization: 0.80
       search-space:
       - { tp: 8, kv-offloading: none,     conc-list: [1, 2, 3, 4, 5] }
-      - { tp: 8, kv-offloading: dram, kv-offload-backend: hicache, conc-list: [8, 10, 16, 32, 40, 44] }
+      - { tp: 8, kv-offloading: dram, kv-offload-backend: hicache, conc-list: [8, 10, 16, 32, 40, 44], kv-transfer: { name: hicache, version: "0.5.13" } }
       # DEP without HiCache is already degraded at conc 52 (2,098 tok/s/GPU),
       # so resolve its pre-52 cliff instead of repeating the collapsed tail.
-      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: none,    conc-list: [16, 24, 32, 38, 44, 48, 50, 52] }
-      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: dram, kv-offload-backend: hicache, conc-list: [16, 32, 38, 44, 50, 56, 64, 66, 68] }
+      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: none,    conc-list: [16, 24, 32, 38, 44, 48, 50, 52], router: { name: sglang-router, version: "0.5.13" } }
+      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: dram, kv-offload-backend: hicache, conc-list: [16, 32, 38, 44, 50, 56, 64, 66, 68], router: { name: sglang-router, version: "0.5.13" }, kv-transfer: { name: hicache, version: "0.5.13" } }
 
 
 
@@ -13150,9 +13159,9 @@ dsv4-fp4-b300-sglang-agentic-hicache:
       search-space:
       - { tp: 4, kv-offloading: none, conc-list: [1, 4, 8, 16, 20, 24, 32] }
       - { tp: 8, kv-offloading: none, conc-list: [1, 4, 8, 16, 32, 40, 48, 52, 56, 60, 64, 72] }
-      - { tp: 4, ep: 4, dp-attn: true, kv-offloading: none, conc-list: [8, 16, 24, 32, 40, 64] }
-      - { tp: 4, ep: 4, dp-attn: true, kv-offloading: dram, kv-offload-backend: hicache, conc-list: [32, 40, 48, 56, 64, 72, 80, 88, 96, 128] }
-      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: none, conc-list: [52, 72, 100, 128, 144, 196, 512] }
+      - { tp: 4, ep: 4, dp-attn: true, kv-offloading: none, conc-list: [8, 16, 24, 32, 40, 64], router: { name: sglang-router, version: "0.5.13" } }
+      - { tp: 4, ep: 4, dp-attn: true, kv-offloading: dram, kv-offload-backend: hicache, conc-list: [32, 40, 48, 56, 64, 72, 80, 88, 96, 128], router: { name: sglang-router, version: "0.5.13" }, kv-transfer: { name: hicache, version: "0.5.13" } }
+      - { tp: 8, ep: 8, dp-attn: true, kv-offloading: none, conc-list: [52, 72, 100, 128, 144, 196, 512], router: { name: sglang-router, version: "0.5.13" } }
 
 
 # DEP8 prefill uses an 8K batch because 16K OOMs in the FP4 MoE intermediate;
@@ -13222,6 +13231,7 @@ dsv4-fp4-gb200-dynamo-vllm-agentic-2p1d-dep8-dep8:
   runner: cluster:gb200-nv
   precision: fp4
   framework: dynamo-vllm
+  router: { name: dynamo-router, version: "1.3.0.dev20260618" }
   multinode: true
   disagg: true
   scenarios:
