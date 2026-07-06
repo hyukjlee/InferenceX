@@ -375,6 +375,29 @@ def test_processor_preserves_dataset_provenance(tmp_path: Path):
     }
 
 
+def test_processor_emits_component_metadata_when_present(tmp_path: Path):
+    result_dir = _write_fixture(tmp_path)
+    agg = _run_processor(
+        result_dir,
+        tmp_path / "out",
+        env_overrides={
+            "ROUTER_METADATA": json.dumps({"name": "vllm-router", "version": "0.1.14"}),
+            "KV_TRANSFER_METADATA": json.dumps({"name": "mooncake", "version": "0.3.11.post1"}),
+        },
+    )
+
+    assert agg["router"] == {"name": "vllm-router", "version": "0.1.14"}
+    assert agg["kv_transfer"] == {"name": "mooncake", "version": "0.3.11.post1"}
+
+
+def test_processor_omits_component_metadata_when_absent(tmp_path: Path):
+    result_dir = _write_fixture(tmp_path)
+    agg = _run_processor(result_dir, tmp_path / "out")
+
+    assert "router" not in agg
+    assert "kv_transfer" not in agg
+
+
 def test_processor_latency_units_are_seconds(tmp_path: Path):
     """aiperf reports ms; legacy schema is seconds. Verify conversion."""
     result_dir = _write_fixture(tmp_path)

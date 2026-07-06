@@ -239,6 +239,36 @@ class TestProcessResultScript:
         assert output_data["output_tput_per_gpu"] == pytest.approx(12000.0 / 8)  # decode gpus
         assert output_data["input_tput_per_gpu"] == pytest.approx((15000.5 - 12000.0) / 20)  # prefill gpus
 
+    def test_component_metadata_is_emitted_when_present(
+        self, tmp_path, sample_benchmark_result, single_node_env_vars
+    ):
+        env = {
+            **single_node_env_vars,
+            "ROUTER_METADATA": json.dumps({"name": "vllm-router", "version": "0.1.14"}),
+            "KV_TRANSFER_METADATA": json.dumps({"name": "mooncake", "version": "0.3.11.post1"}),
+        }
+
+        result = run_script(tmp_path, env, sample_benchmark_result)
+
+        assert result.returncode == 0, f"Script failed: {result.stderr}"
+        output_data = json.loads(result.stdout)
+        assert output_data["router"] == {"name": "vllm-router", "version": "0.1.14"}
+        assert output_data["kv_transfer"] == {"name": "mooncake", "version": "0.3.11.post1"}
+
+    @pytest.mark.parametrize("metadata", [
+        {"name": "vllm-router"},
+        {"name": "vllm-router", "version": "0.1.14", "mode": "round-robin"},
+    ])
+    def test_component_metadata_rejects_partial_or_extra_fields(
+        self, tmp_path, sample_benchmark_result, single_node_env_vars, metadata
+    ):
+        env = {**single_node_env_vars, "ROUTER_METADATA": json.dumps(metadata)}
+
+        result = run_script(tmp_path, env, sample_benchmark_result)
+
+        assert result.returncode != 0
+        assert "must contain exactly 'name' and 'version'" in result.stderr
+
     def test_missing_base_env_vars(self, tmp_path, sample_benchmark_result):
         """Test that missing base env vars causes failure."""
         result_file = tmp_path / "benchmark_result.json"

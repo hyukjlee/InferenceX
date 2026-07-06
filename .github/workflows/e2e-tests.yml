@@ -102,6 +102,8 @@ jobs:
             model-prefix: ${{ matrix.config.model-prefix }}
             framework: ${{ matrix.config.framework }}
             precision: ${{ matrix.config.precision }}
+            router: ${{ matrix.config.router && toJson(matrix.config.router) || '' }}
+            kv-transfer: ${{ matrix.config['kv-transfer'] && toJson(matrix.config['kv-transfer']) || '' }}
             exp-name: ${{ matrix.config.exp-name }}
             conc-list: ${{ toJson(matrix.config.conc) }}
             spec-decoding: ${{ matrix.config.spec-decoding }}
@@ -141,6 +143,8 @@ jobs:
             model-prefix: ${{ matrix.config.model-prefix }}
             framework: ${{ matrix.config.framework }}
             precision: ${{ matrix.config.precision }}
+            router: ${{ matrix.config.router && toJson(matrix.config.router) || '' }}
+            kv-transfer: ${{ matrix.config['kv-transfer'] && toJson(matrix.config['kv-transfer']) || '' }}
             exp-name: ${{ matrix.config.exp-name }}
             conc-list: ${{ toJson(matrix.config.conc) }}
             spec-decoding: ${{ matrix.config.spec-decoding }}
@@ -180,6 +184,8 @@ jobs:
             model-prefix: ${{ matrix.config.model-prefix }}
             framework: ${{ matrix.config.framework }}
             precision: ${{ matrix.config.precision }}
+            router: ${{ matrix.config.router && toJson(matrix.config.router) || '' }}
+            kv-transfer: ${{ matrix.config['kv-transfer'] && toJson(matrix.config['kv-transfer']) || '' }}
             tp: ${{ matrix.config.tp }}
             ep: ${{ matrix.config.ep }}
             dp-attn: ${{ matrix.config.dp-attn }}
@@ -218,6 +224,8 @@ jobs:
             model-prefix: ${{ matrix.config.model-prefix }}
             framework: ${{ matrix.config.framework }}
             precision: ${{ matrix.config.precision }}
+            router: ${{ matrix.config.router && toJson(matrix.config.router) || '' }}
+            kv-transfer: ${{ matrix.config['kv-transfer'] && toJson(matrix.config['kv-transfer']) || '' }}
             conc-list: ${{ toJson(matrix.config.conc) }}
             spec-decoding: ${{ matrix.config.spec-decoding }}
             disagg: ${{ matrix.config.disagg }}
@@ -260,6 +268,8 @@ jobs:
             model-prefix: ${{ matrix.config.model-prefix }}
             framework: ${{ matrix.config.framework }}
             precision: ${{ matrix.config.precision }}
+            router: ${{ matrix.config.router && toJson(matrix.config.router) || '' }}
+            kv-transfer: ${{ matrix.config['kv-transfer'] && toJson(matrix.config['kv-transfer']) || '' }}
             tp: ${{ matrix.config.tp }}
             ep: ${{ matrix.config.ep }}
             dp-attn: ${{ matrix.config.dp-attn }}
@@ -290,6 +300,8 @@ jobs:
             model-prefix: ${{ matrix.config.model-prefix }}
             framework: ${{ matrix.config.framework }}
             precision: ${{ matrix.config.precision }}
+            router: ${{ matrix.config.router && toJson(matrix.config.router) || '' }}
+            kv-transfer: ${{ matrix.config['kv-transfer'] && toJson(matrix.config['kv-transfer']) || '' }}
             tp: ${{ matrix.config.tp }}
             ep: ${{ matrix.config.ep }}
             dp-attn: ${{ matrix.config.dp-attn }}

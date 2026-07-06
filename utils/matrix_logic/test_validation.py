@@ -353,10 +353,42 @@ class TestAgenticMatrixEntries:
             "tp": 8,
             "kv-offloading": "dram",
             "kv-offload-backend": "future-backend",
+            "router": {"name": "vllm-router", "version": "0.1.14"},
+            "kv-transfer": {"name": "mooncake", "version": "0.3.11.post1"},
             "conc-list": [1, 2],
         })
         assert entry.kv_offloading == "dram"
         assert entry.kv_offload_backend == "future-backend"
+        assert entry.router.name == "vllm-router"
+        assert entry.router.version == "0.1.14"
+        assert entry.kv_transfer.name == "mooncake"
+
+    def test_component_metadata_is_optional_for_fixed_sequence_search_space(self):
+        entry = SingleNodeSearchSpaceEntry(**{
+            "tp": 8,
+            "router": {"name": "vllm-router", "version": "0.1.14"},
+            "kv-transfer": {"name": "nixl", "version": "0.7.0"},
+            "conc-list": [1, 2],
+        })
+        assert entry.router.name == "vllm-router"
+        assert entry.kv_transfer.version == "0.7.0"
+
+    @pytest.mark.parametrize("field", ["router", "kv-transfer"])
+    @pytest.mark.parametrize("metadata", [
+        {"name": "vllm-router"},
+        {"version": "0.1.14"},
+        {"name": "vllm-router", "version": "0.1.14", "mode": "round-robin"},
+        {"name": "", "version": "0.1.14"},
+        {"name": "vllm-router", "version": ""},
+    ])
+    def test_component_metadata_requires_exact_non_empty_fields(self, field, metadata):
+        with pytest.raises(Exception):
+            AgenticCodingSearchSpaceEntry(**{
+                "tp": 8,
+                "kv-offloading": "none",
+                field: metadata,
+                "conc-list": [1, 2],
+            })
 
     def test_kv_offload_backend_requires_dram_mode(self):
         with pytest.raises(Exception, match="kv-offload-backend"):

@@ -1831,6 +1831,9 @@ class TestGenerateTestConfigSweep:
 
     def test_runner_node_filter_expands_config_runner(self, sample_multinode_config, sample_runner_config):
         """test-config should allow targeting one concrete runner node."""
+        master_entry = sample_multinode_config["dsr1-fp4-gb200-dynamo-trt"]
+        master_entry["router"] = {"name": "trt-router", "version": "0.20.0"}
+        master_entry["kv-transfer"] = {"name": "nixl", "version": "0.7.0"}
         args = argparse.Namespace(
             config_keys=["dsr1-fp4-gb200-dynamo-trt"],
             seq_lens=None,
@@ -1846,6 +1849,8 @@ class TestGenerateTestConfigSweep:
 
         assert len(result) == 1
         assert result[0]["runner"] == "gb200-nv_0"
+        assert result[0]["router"] == {"name": "trt-router", "version": "0.20.0"}
+        assert result[0]["kv-transfer"] == {"name": "nixl", "version": "0.7.0"}
 
     def test_runner_node_filter_no_match_skips_config(self, sample_multinode_config, sample_runner_config):
         """Unmatched node filters should produce no entries."""
@@ -1875,6 +1880,8 @@ class TestGenerateTestConfigSweep:
                 "framework": "sglang",
                 "runner": "cluster:b300-nv",
                 "multinode": False,
+                "router": {"name": "default-router", "version": "1.0.0"},
+                "kv-transfer": {"name": "default-transfer", "version": "1.0.0"},
                 "scenarios": {
                     "agentic-coding": [
                         {
@@ -1885,6 +1892,8 @@ class TestGenerateTestConfigSweep:
                                     "ep": 1,
                                     "kv-offloading": "dram",
                                     "kv-offload-backend": "hicache",
+                                    "router": {"name": "sglang-router", "version": "0.3.0"},
+                                    "kv-transfer": {"name": "moonstone", "version": "1.2.3"},
                                     "conc-list": [64],
                                 }
                             ],
@@ -1908,6 +1917,8 @@ class TestGenerateTestConfigSweep:
         assert result[0]["scenario-type"] == "agentic-coding"
         assert result[0]["total-cpu-dram-gb"] == 2399
         assert result[0]["duration"] == 3600
+        assert result[0]["router"] == {"name": "sglang-router", "version": "0.3.0"}
+        assert result[0]["kv-transfer"] == {"name": "moonstone", "version": "1.2.3"}
 
     def test_agentic_node_dram_uses_explicit_gpu_count(self, sample_runner_config):
         config = {
@@ -2004,6 +2015,8 @@ class TestGenerateTestConfigSweep:
                             "search-space": [
                                 {
                                     "conc-list": [16, 32, 64, 128, 256],
+                                    "router": {"name": "dynamo-router", "version": "1.3.0"},
+                                    "kv-transfer": {"name": "nixl", "version": "0.7.0"},
                                     "prefill": {"num-worker": 2, "tp": 8, "ep": 8, "dp-attn": False},
                                     "decode": {"num-worker": 1, "tp": 8, "ep": 1, "dp-attn": False},
                                 }
@@ -2028,6 +2041,8 @@ class TestGenerateTestConfigSweep:
         assert result[0]["exp-name"] == "dsv4_p2x8_d1x8_conc16x32x64x128"
         assert result[1]["conc"] == [256]
         assert result[1]["exp-name"] == "dsv4_p2x8_d1x8_conc256"
+        assert all(entry["router"] == {"name": "dynamo-router", "version": "1.3.0"} for entry in result)
+        assert all(entry["kv-transfer"] == {"name": "nixl", "version": "0.7.0"} for entry in result)
 
 
 # =============================================================================

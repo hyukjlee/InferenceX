@@ -55,6 +55,8 @@ class Fields(Enum):
     # Agentic coding fields
     KV_OFFLOADING = 'kv-offloading'
     KV_OFFLOAD_BACKEND = 'kv-offload-backend'
+    ROUTER = 'router'
+    KV_TRANSFER = 'kv-transfer'
     TOTAL_CPU_DRAM_GB = 'total-cpu-dram-gb'
     AVAILABLE_CPU_DRAM_MIB = 'available-cpu-dram-mib'
     DRAM_UTILIZATION = 'dram-utilization'
@@ -85,6 +87,14 @@ class Fields(Enum):
 """
 
 
+class ComponentMetadata(BaseModel):
+    """Strict name and version metadata for an optional runtime component."""
+    model_config = ConfigDict(extra='forbid')
+
+    name: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+
+
 class SingleNodeMatrixEntry(BaseModel):
     """Pydantic model for validating single node matrix entry structure.
     This validates the input that should be expected to .github/workflows/benchmark-tmpl.yml"""
@@ -110,6 +120,10 @@ class SingleNodeMatrixEntry(BaseModel):
     disagg: bool
     run_eval: bool = Field(alias=Fields.RUN_EVAL.value)
     eval_only: bool = Field(alias=Fields.EVAL_ONLY.value, default=False)
+    router: Optional[ComponentMetadata] = None
+    kv_transfer: Optional[ComponentMetadata] = Field(
+        default=None, alias=Fields.KV_TRANSFER.value
+    )
 
 
 class WorkerConfig(BaseModel):
@@ -152,6 +166,10 @@ class MultiNodeMatrixEntry(BaseModel):
     eval_all_concs: bool = Field(
         default=False, alias=Fields.EVAL_ALL_CONCS.value
     )
+    router: Optional[ComponentMetadata] = None
+    kv_transfer: Optional[ComponentMetadata] = Field(
+        default=None, alias=Fields.KV_TRANSFER.value
+    )
 
 
 class SingleNodeAgenticMatrixEntry(BaseModel):
@@ -173,6 +191,10 @@ class SingleNodeAgenticMatrixEntry(BaseModel):
     )
     kv_offload_backend: Optional[str] = Field(
         default=None, alias=Fields.KV_OFFLOAD_BACKEND.value
+    )
+    router: Optional[ComponentMetadata] = None
+    kv_transfer: Optional[ComponentMetadata] = Field(
+        default=None, alias=Fields.KV_TRANSFER.value
     )
     total_cpu_dram_gb: int = Field(alias=Fields.TOTAL_CPU_DRAM_GB.value, ge=0)
     duration: int = Field(alias=Fields.DURATION.value)
@@ -201,6 +223,10 @@ class MultiNodeAgenticMatrixEntry(BaseModel):
     decode: WorkerConfig
     conc: list[int]
     kv_offloading: Literal["none"] = Field(alias=Fields.KV_OFFLOADING.value)
+    router: Optional[ComponentMetadata] = None
+    kv_transfer: Optional[ComponentMetadata] = Field(
+        default=None, alias=Fields.KV_TRANSFER.value
+    )
     duration: int = Field(alias=Fields.DURATION.value)
     exp_name: str = Field(alias=Fields.EXP_NAME.value)
     disagg: bool
@@ -336,6 +362,10 @@ class SingleNodeSearchSpaceEntry(BaseModel):
         default="none", alias=Fields.SPEC_DECODING.value)
     dp_attn: Optional[bool] = Field(
         default=None, alias=Fields.DP_ATTN.value)
+    router: Optional[ComponentMetadata] = None
+    kv_transfer: Optional[ComponentMetadata] = Field(
+        default=None, alias=Fields.KV_TRANSFER.value
+    )
     conc_start: Optional[int] = Field(
         default=None, alias=Fields.CONC_START.value)
     conc_end: Optional[int] = Field(
@@ -356,6 +386,10 @@ class MultiNodeSearchSpaceEntry(BaseModel):
         default="none", alias=Fields.SPEC_DECODING.value)
     prefill: WorkerConfig
     decode: WorkerConfig
+    router: Optional[ComponentMetadata] = None
+    kv_transfer: Optional[ComponentMetadata] = Field(
+        default=None, alias=Fields.KV_TRANSFER.value
+    )
     conc_start: Optional[int] = Field(
         default=None, alias=Fields.CONC_START.value)
     conc_end: Optional[int] = Field(
@@ -404,6 +438,10 @@ class AgenticCodingSearchSpaceEntry(BaseModel):
     )
     kv_offload_backend: Optional[str] = Field(
         default=None, alias=Fields.KV_OFFLOAD_BACKEND.value
+    )
+    router: Optional[ComponentMetadata] = None
+    kv_transfer: Optional[ComponentMetadata] = Field(
+        default=None, alias=Fields.KV_TRANSFER.value
     )
     conc_start: Optional[int] = Field(default=None, alias=Fields.CONC_START.value)
     conc_end: Optional[int] = Field(default=None, alias=Fields.CONC_END.value)
@@ -501,6 +539,10 @@ class SingleNodeMasterConfigEntry(BaseModel):
     runner: str
     multinode: Literal[False]
     disagg: bool = Field(default=False)
+    router: Optional[ComponentMetadata] = None
+    kv_transfer: Optional[ComponentMetadata] = Field(
+        default=None, alias=Fields.KV_TRANSFER.value
+    )
     scenarios: SingleNodeScenarios
 
     @model_validator(mode='after')
@@ -521,6 +563,10 @@ class MultiNodeMasterConfigEntry(BaseModel):
     runner: str
     multinode: Literal[True]
     disagg: bool = Field(default=False)
+    router: Optional[ComponentMetadata] = None
+    kv_transfer: Optional[ComponentMetadata] = Field(
+        default=None, alias=Fields.KV_TRANSFER.value
+    )
     scenarios: MultiNodeScenarios
 
     @model_validator(mode='after')

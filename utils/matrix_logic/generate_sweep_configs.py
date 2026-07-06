@@ -114,6 +114,16 @@ def agentic_kv_offload_suffix(kv_offloading: str, kv_offload_backend: str | None
     return f"kv{kv_offloading}-{kv_offload_backend}"
 
 
+def component_metadata(benchmark: dict, config: dict) -> dict:
+    """Resolve optional component metadata, preferring search-space overrides."""
+    metadata = {}
+    for field in (Fields.ROUTER, Fields.KV_TRANSFER):
+        value = benchmark.get(field.value, config.get(field.value))
+        if value is not None:
+            metadata[field.value] = value
+    return metadata
+
+
 def chunk_multinode_agentic_concurrencies(conc_values: list[int]) -> list[list[int]]:
     """Bound sequential agentic profiles sharing one server allocation."""
     size = MAX_MULTINODE_AGENTIC_CONCURRENCIES_PER_ALLOCATION
@@ -457,6 +467,7 @@ def generate_full_sweep(args, all_config_data, runner_data):
                             Fields.DISAGG.value: disagg,
                             Fields.RUN_EVAL.value: False,  # Default, may be overridden by mark_eval_entries
                         }
+                        entry.update(component_metadata(bmk, val))
 
                         validate_matrix_entry(entry, is_multinode)
                         matrix_values.append(entry)
@@ -570,6 +581,7 @@ def generate_full_sweep(args, all_config_data, runner_data):
                             if dp_attn is not None:
                                 entry[Fields.DP_ATTN.value] = dp_attn
 
+                            entry.update(component_metadata(bmk, val))
                             validate_matrix_entry(entry, is_multinode)
                             matrix_values.append(entry)
 
@@ -654,6 +666,7 @@ def generate_full_sweep(args, all_config_data, runner_data):
                                 Fields.DISAGG.value: disagg,
                                 Fields.SCENARIO_TYPE.value: "agentic-coding",
                             }
+                            entry.update(component_metadata(bmk, val))
                             validate_agentic_matrix_entry(entry)
                             matrix_values.append(entry)
                 else:
@@ -681,6 +694,7 @@ def generate_full_sweep(args, all_config_data, runner_data):
                             }
                             if kv_offload_backend is not None:
                                 entry[Fields.KV_OFFLOAD_BACKEND.value] = kv_offload_backend
+                            entry.update(component_metadata(bmk, val))
                             validate_agentic_matrix_entry(entry)
                             matrix_values.append(entry)
 
@@ -797,6 +811,7 @@ def generate_test_config_sweep(args, all_config_data, runner_data=None):
                             Fields.DISAGG.value: disagg,
                             Fields.RUN_EVAL.value: False,
                         }
+                        entry.update(component_metadata(bmk, val))
                         matrix_values.append(validate_matrix_entry(entry, is_multinode=True))
                 else:
                     # Single-node config
@@ -849,6 +864,7 @@ def generate_test_config_sweep(args, all_config_data, runner_data=None):
                                 Fields.DISAGG.value: disagg,
                                 Fields.RUN_EVAL.value: False,
                             }
+                            entry.update(component_metadata(bmk, val))
                             matrix_values.append(validate_matrix_entry(entry, is_multinode=False))
 
         # ---- Agentic-coding scenarios ----
@@ -921,6 +937,7 @@ def generate_test_config_sweep(args, all_config_data, runner_data=None):
                                 Fields.DISAGG.value: disagg,
                                 Fields.SCENARIO_TYPE.value: "agentic-coding",
                             }
+                            entry.update(component_metadata(bmk, val))
                             matrix_values.append(validate_agentic_matrix_entry(entry))
                 else:
                     for conc in conc_values:
@@ -947,6 +964,7 @@ def generate_test_config_sweep(args, all_config_data, runner_data=None):
                             }
                             if kv_offload_backend is not None:
                                 entry[Fields.KV_OFFLOAD_BACKEND.value] = kv_offload_backend
+                            entry.update(component_metadata(bmk, val))
                             matrix_values.append(validate_agentic_matrix_entry(entry))
 
     return matrix_values

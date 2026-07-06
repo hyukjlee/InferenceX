@@ -12,6 +12,9 @@ entry-name:
   runner: string
   precision: string
   framework: string
+  # Optional defaults for every search-space entry in this config.
+  router: { name: string, version: string }
+  kv-transfer: { name: string, version: string }
   scenarios:
     fixed-seq-len:
     - isl: int
@@ -20,6 +23,12 @@ entry-name:
       - { tp: int, conc-start: int, conc-end: int }
       # Optionally, specify 'ep' (expert-parallelism) and 'dp-attn' (data parallel attention)
       - { tp: int, ep: int, dp-attn: bool, conc-start: int, conc-end: int }
+      # Optionally, declare router and KV transfer component metadata.
+      - tp: int
+        router: { name: string, version: string }
+        kv-transfer: { name: string, version: string }
+        conc-start: int
+        conc-end: int
       - ...
     - ...
     agentic-coding:  # optional
@@ -52,9 +61,17 @@ The below list describes what each field is:
       - Note: the step factor between `conc-start` and `conc-end` is 2, so if `conc-start` is 4 and `conc-end` is 128, all concurrencies `4, 8, 16, 32, ..., 128` will be run.
       - (Optional) `ep`: An integer representing the expert parallelism level that the configuration will be served at. Default is 1 (no expert parallelism) when not specified.
       - (Optional) `dp-attn`: A boolean representing whether or not to activate data parallel attention for the configuration. Default is false when not specified.
+      - (Optional) `router`: Router metadata containing exactly non-empty `name` and `version` strings.
+      - (Optional) `kv-transfer`: KV transfer metadata containing exactly non-empty `name` and `version` strings.
   - `agentic-coding`: Agentic trace replay benchmarks using real conversation traces. Each entry must have:
     - `trace-source`: Identifier for the trace dataset to use.
     - `search-space`: Same structure as `fixed-seq-len` search-space entries.
+
+`router` and `kv-transfer` may be omitted independently. When either field is
+present, both `name` and `version` are required and additional keys are rejected.
+Top-level declarations apply to every scenario and search-space entry in that
+master config. A search-space declaration overrides the corresponding top-level
+value for that point.
 
 Agentic duration is not a master YAML field. Matrix generation defaults agentic
 jobs to 3600 seconds; reusable workflow callers may override the `duration`

@@ -36,6 +36,24 @@ def required_env(name: str) -> str:
     return value
 
 
+def optional_component_metadata(env_name: str) -> dict[str, str] | None:
+    """Parse strict optional component metadata from a JSON environment value."""
+    raw_value = os.environ.get(env_name)
+    if raw_value in (None, "", "null"):
+        return None
+
+    try:
+        metadata = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{env_name} must contain valid JSON") from exc
+
+    if not isinstance(metadata, dict) or set(metadata) != {"name", "version"}:
+        raise SystemExit(f"{env_name} must contain exactly 'name' and 'version'")
+    if not all(isinstance(metadata[key], str) and metadata[key] for key in metadata):
+        raise SystemExit(f"{env_name} name and version must be non-empty strings")
+    return metadata
+
+
 def _validate_kv_offload_env() -> tuple[str, str]:
     kv_offloading = required_env("KV_OFFLOADING")
     kv_offload_backend = os.environ.get("KV_OFFLOAD_BACKEND", "")
@@ -138,6 +156,14 @@ def build_agg(
         "request_accounting": request_accounting,
     }
     agg.update(multinode_fields)
+
+    for env_name, result_field in (
+        ("ROUTER_METADATA", "router"),
+        ("KV_TRANSFER_METADATA", "kv_transfer"),
+    ):
+        metadata = optional_component_metadata(env_name)
+        if metadata is not None:
+            agg[result_field] = metadata
 
     metadata = aggregate.get("metadata")
     if isinstance(metadata, dict):
