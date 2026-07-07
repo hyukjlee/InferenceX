@@ -52,6 +52,62 @@ on:
                 default: ""
 
 jobs:
+    # [TEMP SMOKE-ONLY] GPU-free Modal auth probe; runs on every dispatch of
+    # this branch's workflow. Never prints secret values. Drop before merge.
+    modal-probe:
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        env:
+            MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+            MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        steps:
+            - name: Install modal
+              run: pip install -q modal
+            - name: Shape diagnostics (lengths/format only, no values)
+              run: |
+                python3 - <<'PY_INNER'
+                import os, re
+                for name in ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"):
+                    v = os.environ.get(name, "")
+                    st = v.strip()
+                    print(name, "len=", len(v), "stripped_len=", len(st),
+                          "edge_ws=", v != st,
+                          "internal_ws=", bool(re.search(r"\s", st)),
+                          "quoted=", (st[:1] in ("'", '"')) if st else False,
+                          "prefix=", st[:3] if st else "(empty)")
+                PY_INNER
+            - name: Auth (raw values)
+              id: raw
+              continue-on-error: true
+              run: |
+                if modal app list > /dev/null 2>/tmp/raw_err; then
+                  echo "RAW AUTH OK"
+                else
+                  echo "RAW AUTH FAILED:"; head -c 300 /tmp/raw_err; exit 1
+                fi
+            - name: Auth (whitespace/quote-sanitized values)
+              id: sanitized
+              continue-on-error: true
+              run: |
+                MODAL_TOKEN_ID="$(printf %s "$MODAL_TOKEN_ID" | tr -d "[:space:]\"'" )"
+                MODAL_TOKEN_SECRET="$(printf %s "$MODAL_TOKEN_SECRET" | tr -d "[:space:]\"'" )"
+                export MODAL_TOKEN_ID MODAL_TOKEN_SECRET
+                if modal app list > /dev/null 2>/tmp/san_err; then
+                  echo "SANITIZED AUTH OK"
+                else
+                  echo "SANITIZED AUTH FAILED:"; head -c 300 /tmp/san_err; exit 1
+                fi
+            - name: Verdict
+              run: |
+                echo "raw=${{ steps.raw.outcome }} sanitized=${{ steps.sanitized.outcome }}"
+                if [ "${{ steps.raw.outcome }}" = "failure" ] && [ "${{ steps.sanitized.outcome }}" = "failure" ]; then
+                  echo "VERDICT: token values INVALID — needs a fresh Modal token in repo secrets"
+                elif [ "${{ steps.raw.outcome }}" = "failure" ]; then
+                  echo "VERDICT: secrets contain whitespace/quotes — code-side sanitization will fix"
+                else
+                  echo "VERDICT: auth OK from ubuntu — failure is CI-container-specific"
+                fi
+
     get-jobs:
         runs-on: ubuntu-latest
         outputs:
