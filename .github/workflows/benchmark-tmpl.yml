@@ -134,7 +134,7 @@ env:
   # bootstrapped into ~/.modal.toml by benchmark_lib.sh:_ensure_modal_credentials.
   SWEBENCH_USE_MODAL: 'true'
   # [TEMP SMOKE-ONLY] parallel Modal sandboxes for the overnight baseline
-  SWEBENCH_MAX_WORKERS: '16'
+  SWEBENCH_MAX_WORKERS: '8'
   MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
   MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
   # [TEMP SMOKE-ONLY] b300-005 is a black-hole node (NCCL/CUDA init death,
