@@ -141,6 +141,8 @@ env:
   SWEBENCH_USE_MODAL: 'true'
   # [TEMP SMOKE-ONLY] parallel Modal sandboxes for the overnight baseline
   SWEBENCH_MAX_WORKERS: '8'
+  # [TEMP SMOKE-ONLY] 7/10 agents hit the 30-step default before submitting
+  SWEBENCH_AGENT_STEP_LIMIT: '75'
   MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
   MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
   # [TEMP SMOKE-ONLY] b300-005 is a black-hole node (NCCL/CUDA init death,
