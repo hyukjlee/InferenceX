@@ -1170,6 +1170,19 @@ _install_swebench_deps() {
 # the env so the harness's check passes. Never overwrite an existing file.
 _ensure_modal_credentials() {
     if [ "${SWEBENCH_USE_MODAL:-false}" != "true" ]; then return 0; fi
+    # CI secrets are frequently pasted with a trailing newline (or quotes); a
+    # contaminated token fails Modal validation outright ("Token validation
+    # failed"). Tokens never contain whitespace/quotes, so strip and re-export
+    # -- the modal client reads the env vars directly and takes precedence
+    # over ~/.modal.toml, so the env must be clean too.
+    if [ -n "${MODAL_TOKEN_ID:-}" ]; then
+        MODAL_TOKEN_ID=$(printf %s "$MODAL_TOKEN_ID" | tr -d "[:space:]\"'")
+        export MODAL_TOKEN_ID
+    fi
+    if [ -n "${MODAL_TOKEN_SECRET:-}" ]; then
+        MODAL_TOKEN_SECRET=$(printf %s "$MODAL_TOKEN_SECRET" | tr -d "[:space:]\"'")
+        export MODAL_TOKEN_SECRET
+    fi
     if [ -f "${HOME:-}/.modal.toml" ]; then return 0; fi
     if [ -n "${MODAL_TOKEN_ID:-}" ] && [ -n "${MODAL_TOKEN_SECRET:-}" ]; then
         # On b300 slurm/pyxis, --export=ALL may propagate the HOST's HOME into
@@ -1195,8 +1208,13 @@ _ensure_modal_credentials() {
 maybe_run_eval() {
     local port="${1:-${PORT:-8888}}"
     if [ "${RUN_EVAL}" = "true" ]; then
-        run_eval --port "$port"
-        append_lm_eval_summary
+        # Stage whatever artifacts exist even when the eval fails (e.g. scoring
+        # dies or times out after generation) so samples/results still upload
+        # for diagnosis instead of dying with the job sandbox.
+        local eval_rc=0
+        run_eval --port "$port" || eval_rc=$?
+        append_lm_eval_summary || true
+        return "$eval_rc"
     fi
 }
 
@@ -1280,6 +1298,10 @@ run_swebench_eval() {
     local score_rc=0
     local ns_args=()
     if [ "${SWEBENCH_NAMESPACE+set}" = "set" ]; then ns_args=(--namespace "$SWEBENCH_NAMESPACE"); fi
+    # Guard against a stalled scoring backend (e.g. Modal image-build queue):
+    # kill scoring after SWEBENCH_SCORE_TIMEOUT seconds (default 2h) rather
+    # than holding the GPU allocation until the slurm wall clock.
+    timeout "${SWEBENCH_SCORE_TIMEOUT:-7200}" \
     python3 utils/evals/swebench_score.py \
         --samples-dir "$gen_dir" \
         --out-dir "$out_dir" \
