@@ -236,9 +236,17 @@ COMMON_ARGS=(
 # the local rank-0 health port is always VLLM_PORT.
 HEALTH_PORT="$VLLM_PORT"
 API_SERVER_COUNT="${LLMD_API_SERVER_COUNT:-4}"
-if [[ "$ROLE_ENABLE_EP" == "true" ]] || [[ "$LWS_GROUP_SIZE" -le 1 ]] || [[ "$LWS_WORKER_INDEX" -eq 0 ]]; then
+# Multiple frontends only help the DP (wide-EP) path, where they load-balance
+# across the node's local DP ranks. A pure-TP engine has a single core with one
+# frontend, so it keeps the default count (also avoids --api-server-count
+# interacting with the --headless multi-node TP launch below). Every DEP8 node
+# gets it; pure-TP nodes get none.
+if [[ "$ROLE_ENABLE_EP" == "true" ]]; then
     COMMON_ARGS+=(--api-server-count "$API_SERVER_COUNT")
 fi
+# Set to 1 by the pure-TP multi-node branch below on --headless followers, which
+# run no local api-server; gates the post-launch health wait.
+IS_HEADLESS_FOLLOWER=0
 # --moe-backend is model-specific (DSR1-FP8 wants deep_gemm, gpt-oss-MXFP4
 # rejects it), so each recipe sets its own via extra-args.
 
@@ -269,6 +277,7 @@ elif [[ "$LWS_GROUP_SIZE" -gt 1 ]]; then
     )
     if [[ "$LWS_WORKER_INDEX" -gt 0 ]]; then
         COMMON_ARGS+=(--headless)
+        IS_HEADLESS_FOLLOWER=1
     fi
 fi
 
@@ -279,19 +288,30 @@ vllm serve "$MODEL" "${COMMON_ARGS[@]}" $ROLE_EXTRA_ARGS \
 VLLM_PID=$!
 
 # Each rank waits for its own engine /health before continuing (for wide-EP this
-# blocks the bench until worker DP shards are up; a no-op for single-node).
-wait_for_server_ready --port "$HEALTH_PORT" --server-log "$VLLM_LOG" --server-pid "$VLLM_PID"
-echo "vLLM ready on rank $NODE_RANK ($ROLE worker_index=$LWS_WORKER_INDEX, health port $HEALTH_PORT)"
+# blocks the bench until worker DP shards are up; a no-op for single-node). A
+# pure-TP --headless follower runs no local api-server (only the TP-group leader
+# binds a health port, and its /health only reports ready once every TP worker
+# has joined), so it skips the wait and stays alive via the final `wait`.
+if [[ "$IS_HEADLESS_FOLLOWER" -eq 1 ]]; then
+    echo "vLLM headless TP follower on rank $NODE_RANK (worker_index=$LWS_WORKER_INDEX): no local api-server, skipping health wait"
+else
+    wait_for_server_ready --port "$HEALTH_PORT" --server-log "$VLLM_LOG" --server-pid "$VLLM_PID"
+    echo "vLLM ready on rank $NODE_RANK ($ROLE worker_index=$LWS_WORKER_INDEX, health port $HEALTH_PORT)"
+fi
 
 # ----------------------------------------------------------------
 # Bring up pd-sidecar (every decode node)
 # ----------------------------------------------------------------
-# Each decode node runs its own sidecar (SIDECAR_PORT -> local decode vLLM), and
-# endpoints.yaml lists one decode endpoint per node so EPP fans out across all
-# decode ranks. The sidecar forwards a prefill request, reads kv_transfer_params
-# from vLLM's response, then hits its local decode vLLM, whose NIXLv2 connector
-# pulls KV directly from prefill vLLM.
-if [[ "$ROLE" == "decode" ]]; then
+# The sidecar forwards a prefill request, reads kv_transfer_params from vLLM's
+# response, then hits its local decode vLLM, whose NIXLv2 connector pulls KV
+# directly from prefill vLLM.
+#
+# DEP8 (EP on, hybrid-LB): every decode node runs an api-server for its local DP
+# ranks, so every decode node runs a sidecar and endpoints.yaml lists one decode
+# endpoint per node. Pure-TP: only the TP-group leader has an api-server
+# (followers are --headless), so only the leader runs a sidecar and only leaders
+# are listed as endpoints.
+if [[ "$ROLE" == "decode" && ( "$ROLE_ENABLE_EP" == "true" || "$LWS_WORKER_INDEX" -eq 0 ) ]]; then
     SIDECAR_CONNECTOR="nixlv2"
     SIDECAR_FLAGS=(--port="$SIDECAR_PORT" --vllm-port="$VLLM_PORT"
                    --kv-connector="$SIDECAR_CONNECTOR" --secure-proxy=false
@@ -328,6 +348,11 @@ NS = 'inferencex'
 all_ips = [x for x in os.environ.get('ALL_IPS', '').split(',') if x]
 pn = int(os.environ.get('PREFILL_NODES', '1'))
 dn = int(os.environ.get('DECODE_NODES', '1'))
+decode_workers = max(1, int('$DECODE_WORKERS'))
+# This block runs on the coordinator (a decode node), so ROLE_ENABLE_EP here
+# reflects the DECODE role. EP on => DEP8 hybrid-LB (an api-server per node);
+# EP off => pure-TP (only each TP-group leader has an api-server).
+decode_ep = ('$ROLE_ENABLE_EP' == 'true')
 VLLM_PORT = int('$VLLM_PORT')
 SIDECAR_PORT = int('$SIDECAR_PORT')
 # ALL_IPS is rank-ordered: ranks [0:pn] are prefill nodes, [pn:pn+dn] decode.
@@ -335,17 +360,22 @@ prefill_ips = all_ips[:pn] or [os.environ['PREFILL_LEADER_IP']]
 decode_ips = all_ips[pn:pn + dn] or [os.environ['DECODE_LEADER_IP']]
 endpoints = []
 
-def add_role(role, ips, base_port):
-    # ONE endpoint per node at base_port (hybrid LB: the node's api-server /
-    # sidecar internally load-balances its local DP ranks).
-    for i, ip in enumerate(ips):
+def add_role(role, ips, base_port, group_size=1):
+    # group_size == 1: one endpoint per node (DEP8 hybrid-LB: each node's
+    # api-server / sidecar load-balances its local DP ranks).
+    # group_size  > 1: one endpoint per TP-group leader (pure-TP: followers are
+    # --headless with no api-server), i.e. every group_size-th node IP.
+    serving_ips = ips[::group_size] if group_size > 1 else ips
+    for i, ip in enumerate(serving_ips):
         endpoints.append({'name': f'{role}-{i}', 'namespace': NS, 'address': ip,
                           'port': str(base_port), 'labels': {'llm-d.ai/role': role}})
 
-# Prefill: EPP hits the vLLM directly (VLLM_PORT). Decode: EPP hits the
-# pd-sidecar (SIDECAR_PORT), which forwards to the local decode vLLM and pulls KV.
+# Prefill (DEP8 in every current recipe): one endpoint per node, EPP hits vLLM
+# directly (VLLM_PORT). Decode: EPP hits the pd-sidecar (SIDECAR_PORT); one
+# endpoint per node for DEP8, or one per TP-group leader for pure-TP.
 add_role('prefill', prefill_ips, VLLM_PORT)
-add_role('decode', decode_ips, SIDECAR_PORT)
+decode_group = 1 if decode_ep else max(1, dn // decode_workers)
+add_role('decode', decode_ips, SIDECAR_PORT, group_size=decode_group)
 yaml.safe_dump({'endpoints': endpoints}, open('/tmp/endpoints.yaml', 'w'))
 print(f'endpoints.yaml ({len(endpoints)} endpoints):')
 print(open('/tmp/endpoints.yaml').read())
