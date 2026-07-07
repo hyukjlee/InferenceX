@@ -1,0 +1,63 @@
+name: Modal auth probe (temp, smoke-only)
+# [TEMP SMOKE-ONLY] Validates MODAL_TOKEN_ID/MODAL_TOKEN_SECRET secrets without
+# burning a GPU node. Never prints secret values — lengths/format only.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - name: Install modal
+        run: pip install -q modal
+      - name: Shape diagnostics (no secret values printed)
+        run: |
+          python3 - <<'PY'
+          import os, re
+          for name in ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"):
+              v = os.environ.get(name, "")
+              stripped = v.strip()
+              print(f"{name}: len={len(v)} stripped_len={len(stripped)} "
+                    f"has_leading_trailing_ws={v != stripped} "
+                    f"has_internal_ws={bool(re.search(r'[\s]', stripped))} "
+                    f"has_quotes={stripped[:1] in ('\"', chr(39)) if stripped else False} "
+                    f"prefix={stripped[:3] if stripped else '(empty)'}")
+          PY
+      - name: Auth check (raw values as CI delivers them)
+        id: raw
+        continue-on-error: true
+        run: |
+          python3 - <<'PY'
+          import modal
+          try:
+              # lightweight authenticated call
+              list(modal.App.list())[:0] if hasattr(modal.App, "list") else None
+              from modal.client import Client
+              Client.verify(None, None) if False else None
+          except Exception:
+              pass
+          # the reliable check: lookup requires a valid token
+          import subprocess, sys
+          r = subprocess.run(["modal", "app", "list"], capture_output=True, text=True)
+          print("modal app list rc:", r.returncode)
+          print((r.stderr or r.stdout).strip()[:300])
+          sys.exit(r.returncode)
+          PY
+      - name: Auth check (whitespace-sanitized values)
+        id: sanitized
+        continue-on-error: true
+        run: |
+          export MODAL_TOKEN_ID="$(printf %s "$MODAL_TOKEN_ID" | tr -d '[:space:]' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+          export MODAL_TOKEN_SECRET="$(printf %s "$MODAL_TOKEN_SECRET" | tr -d '[:space:]' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+          modal app list >/dev/null 2>/tmp/err && echo "SANITIZED: AUTH OK" || { echo "SANITIZED: AUTH FAILED"; head -c 300 /tmp/err; exit 1; }
+      - name: Verdict
+        run: |
+          echo "raw:        ${{ steps.raw.outcome }}"
+          echo "sanitized:  ${{ steps.sanitized.outcome }}"
