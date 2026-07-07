@@ -135,6 +135,9 @@ env:
   SWEBENCH_USE_MODAL: 'true'
   MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
   MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+  # [TEMP SMOKE-ONLY] b300-005 is a black-hole node (NCCL/CUDA init death,
+  # jobs 30508/30548); salloc honors this env natively. Drop before merge.
+  SALLOC_EXCLUDE: 'b300-005'
 
 permissions:
   contents: read
