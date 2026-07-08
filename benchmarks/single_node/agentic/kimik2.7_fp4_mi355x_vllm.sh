@@ -145,13 +145,19 @@ case "$OFFLOAD_MODE" in
         unset VLLM_USE_SIMPLE_KV_OFFLOAD
 
         # Build LMCache against ROCm if the connector isn't already importable
-        # (prebuilt kimi-lmcache images already ship it).
+        # (prebuilt kimi-lmcache images already ship it). Clone to a
+        # container-local dir (NOT the bind-mounted /workspace) so the CI
+        # checkout's `clean: true` never trips over root-owned build artifacts
+        # on the next job. Pin a ref for reproducibility.
         if ! python3 -c "import lmcache.integration.vllm.lmcache_mp_connector" >/dev/null 2>&1; then
-            git clone https://github.com/LMCache/LMCache.git
-            cd LMCache
-            pip install -r requirements/build.txt
-            CXX=hipcc BUILD_WITH_HIP=1 pip install -e . --no-build-isolation
-            cd ..
+            LMCACHE_SRC_DIR="${LMCACHE_SRC_DIR:-/opt/lmcache-src}"
+            LMCACHE_GIT_REF="${LMCACHE_GIT_REF:-aaf7c0d3}"
+            rm -rf "$LMCACHE_SRC_DIR"
+            git clone https://github.com/LMCache/LMCache.git "$LMCACHE_SRC_DIR"
+            ( cd "$LMCACHE_SRC_DIR"
+              git checkout "$LMCACHE_GIT_REF"
+              pip install -r requirements/build.txt
+              CXX=hipcc BUILD_WITH_HIP=1 pip install -e . --no-build-isolation )
             python3 -c "import lmcache.integration.vllm.lmcache_mp_connector" >/dev/null
         fi
 

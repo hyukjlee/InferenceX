@@ -97,5 +97,16 @@ docker run --rm --name "$CONTAINER" \
     "$BENCHMARK_SCRIPT"
 RC=$?
 
+# The recipe runs as root inside the container and writes results/ (and any
+# other artifacts) into the bind-mounted workspace as root. The next job's
+# actions/checkout `clean: true` runs as the (non-root) runner user and would
+# fail to remove them (EACCES). Chown the workspace back to the host UID/GID
+# via a throwaway root container so the checkout can always clean it.
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
+docker run --rm -v "$GITHUB_WORKSPACE":/workspace --entrypoint chown \
+    "$IMAGE" -R "${HOST_UID}:${HOST_GID}" /workspace 2>/dev/null || \
+    echo "[gbt350docker] WARN: workspace chown failed; next checkout may need manual cleanup"
+
 echo "[gbt350docker] recipe exit=$RC"
 exit $RC
