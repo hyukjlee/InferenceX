@@ -4,9 +4,8 @@ set -x
 
 # Agentic trace replay benchmark for Kimi-K2.7 FP4 on MI355X using vLLM.
 #
-# Variant of kimik2.7_fp4_mi355x.sh that supports THREE KV configs:
+# Variant of kimik2.7_fp4_mi355x.sh that supports TWO KV configs:
 #   KV_OFFLOADING=none                              -> GPU KV only
-#   KV_OFFLOADING=dram KV_OFFLOAD_BACKEND=native    -> vLLM native CPU offload
 #   KV_OFFLOADING=dram KV_OFFLOAD_BACKEND=lmcache   -> LMCache MP server + connector
 #
 # Required env vars:
@@ -133,14 +132,6 @@ case "$OFFLOAD_MODE" in
     none)
         OFFLOAD_ARGS=(--no-enable-prefix-caching)
         ;;
-    native)
-        unset VLLM_USE_SIMPLE_KV_OFFLOAD
-        OFFLOAD_ARGS=(
-            --kv_offloading_backend native
-            --kv_offloading_size "$TOTAL_CPU_DRAM_GB"
-            --disable-hybrid-kv-cache-manager
-        )
-        ;;
     lmcache)
         unset VLLM_USE_SIMPLE_KV_OFFLOAD
 
@@ -211,7 +202,7 @@ case "$OFFLOAD_MODE" in
         )
         ;;
     *)
-        echo "Error: unsupported KV_OFFLOAD_BACKEND '$OFFLOAD_MODE' (expected: native, lmcache)" >&2
+        echo "Error: unsupported KV_OFFLOAD_BACKEND '$OFFLOAD_MODE' (expected: lmcache)" >&2
         exit 1
         ;;
 esac
