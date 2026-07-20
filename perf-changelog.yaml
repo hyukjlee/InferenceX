@@ -4991,3 +4991,14 @@
     - "Add a Mooncake KV-offload backend to the recipe (embedded MooncakeStoreConnector store). Built from source for ROCm via Mooncake's build_wheel.sh and pip-installed so the mooncake package lands in site-packages and is importable from the vLLM worker subprocesses (a bare make install left workers unable to import it)"
     - "Adds optional per-scenario 'duration' override to the agentic-coding config schema (defaults to 3600s when unset)"
   pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/2126
+
+- config-keys:
+    - kimik2.7-fp4-mi355x-vllm-agentic-mtp
+    - kimik2.7-fp4-mi355x-vllm-agentic
+  description:
+    - "Add EAGLE3 speculative-decoding ('MTP') variant kimik2.7-fp4-mi355x-vllm-agentic-mtp: spec-decoding: mtp routes to benchmarks/single_node/agentic/kimik2.7_fp4_mi355x_mtp.sh, which serves the K2.7-Code-matched draft lightseekorg/kimi-k2.7-coder-eagle3.1-mla (EAGLE3.1 MLA, num_speculative_tokens 3, env-overridable via DRAFT_MODEL/NUM_SPEC_TOKENS/VLLM_SPEC_CONFIG). Kimi-K2 has no native MTP, so the draft is external; it is pre-staged with hf download before serving so a cold pull cannot blow READY_TIMEOUT at engine init"
+    - "Mirrors the base best-config envelope (GPU-only none [4,8] + LMCache dram [16], TP8, 3600s) so the MTP throughput delta is apples-to-apples"
+    - "Add the SWE-bench agentic accuracy path (EVAL_ONLY -> run_eval) to both the base and MTP recipes, plus the Kimi eval parser flags on the vLLM server (--tool-call-parser kimi_k2 --enable-auto-tool-choice --reasoning-parser kimi_k2) so message.tool_calls parse for the agent harness; harmless for the throughput replay path"
+    - "Align both recipes' server flags with the official recipes.vllm.ai/moonshotai/Kimi-K2.7-Code MI355X recipe: add --moe-backend flydsl (FlyDSL W4A16 MoE kernel for gfx950) and --compilation-config {pass_config:{fuse_allreduce_rms:false}} (required on MI350X/MI355X). Retains the sweep-tuned --block-size=1 + VLLM_ROCM_USE_AITER_MLA=1 (~3x TRITON_MLA on the agentic trace), which the recipe page does not specify"
+    - "Harden the LMCache MP server config (all flags verified present at the pinned aaf7c0d3 build): split the worker pools --max-gpu-workers 1 / --max-cpu-workers 8 (was --max-workers TP*2, which set both pools equal) to avoid concurrent-GPU-transfer stalls under async-load (the conc64 stall class), and add --chunk-size 1024, --l1-align-bytes 16384, --eviction-trigger-watermark 0.85, --eviction-ratio 0.10, --supported-transfer-mode lmcache_driven. Keeps the dynamic SHM-aware --l1-size-gb sizing rather than a hardcoded value"
+  pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/2126

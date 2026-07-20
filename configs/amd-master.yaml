@@ -570,6 +570,53 @@ kimik2.7-fp4-mi355x-vllm-agentic:
       - { tp: 8, kv-offloading: none, conc-list: [4, 8] }
       - { tp: 8, kv-offloading: dram, kv-offload-backend: { name: lmcache, version: "aaf7c0d3" }, conc-list: [16] }
 
+# EAGLE3 speculative-decoding ("MTP") variant of kimik2.7-fp4-mi355x-vllm-agentic.
+# spec-decoding: mtp routes to kimik2.7_fp4_mi355x_mtp.sh, which adds the
+# K2.7-Code-matched EAGLE3.1 draft (lightseekorg/kimi-k2.7-coder-eagle3.1-mla,
+# num_speculative_tokens 3). Mirrors the base best-config envelope (none [4,8] +
+# LMCache [16]) so the MTP throughput delta is apples-to-apples; spec decoding
+# lifts decode most at low conc, where the draft's acceptance is not
+# capacity-starved. Accuracy (SWE-bench agentic) runs via the shared EVAL_ONLY
+# path in the recipe.
+kimik2.7-fp4-mi355x-vllm-agentic-mtp:
+  image: vllm/vllm-openai-rocm:v0.24.0
+  model: amd/Kimi-K2.7-Code-MXFP4
+  model-prefix: kimik2.7
+  runner: cluster:mi355x-amds
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    agentic-coding:
+    - dram-utilization: 0.80
+      duration: 3600
+      search-space:
+      - { tp: 8, kv-offloading: none, conc-list: [4, 8], spec-decoding: mtp }
+      - { tp: 8, kv-offloading: dram, kv-offload-backend: { name: lmcache, version: "aaf7c0d3" }, conc-list: [16], spec-decoding: mtp }
+
+# Smoke-test key for the MTP recipe: TP4 + TP8 x {none c4, LMCache c16}, 900s.
+# Same model-prefix (kimik2.7) + spec-decoding: mtp -> routes to
+# kimik2.7_fp4_mi355x_mtp.sh. Validates the EAGLE3 draft + flydsl/compile +
+# LMCache-alignment changes launch and produce aiperf numbers at both TP
+# widths. Temporary; drop once the recipe is verified.
+kimik2.7-fp4-mi355x-vllm-agentic-mtp-smoke:
+  image: vllm/vllm-openai-rocm:v0.24.0
+  model: amd/Kimi-K2.7-Code-MXFP4
+  model-prefix: kimik2.7
+  runner: cluster:mi355x-amds
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    agentic-coding:
+    - dram-utilization: 0.80
+      duration: 900
+      search-space:
+      - { tp: 4, kv-offloading: none, conc-list: [4], spec-decoding: mtp }
+      - { tp: 4, kv-offloading: dram, kv-offload-backend: { name: lmcache, version: "aaf7c0d3" }, conc-list: [16], spec-decoding: mtp }
+      - { tp: 8, kv-offloading: none, conc-list: [4], spec-decoding: mtp }
+      - { tp: 8, kv-offloading: dram, kv-offload-backend: { name: lmcache, version: "aaf7c0d3" }, conc-list: [16], spec-decoding: mtp }
+
 
 kimik2.5-fp4-mi355x-atom:
   image: rocm/atom:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0_atom0.1.4_202607091539

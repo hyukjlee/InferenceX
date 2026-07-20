@@ -2,10 +2,16 @@
 set -euo pipefail
 set -x
 
-# Agentic trace replay benchmark for Kimi-K2.7 FP4 on MI355X using vLLM.
+# Agentic trace replay benchmark for Kimi-K2.7 FP4 on MI355X using vLLM,
+# with EAGLE3 speculative decoding ("MTP" arm; Kimi-K2 has no native MTP, so
+# spec decoding is an external EAGLE3 draft).
 #   KV_OFFLOADING=none                              -> GPU KV only
 #   KV_OFFLOADING=dram KV_OFFLOAD_BACKEND=lmcache   -> LMCache MP server + connector
 #   KV_OFFLOADING=dram KV_OFFLOAD_BACKEND=mooncake  -> Mooncake embedded store + connector
+#
+# Draft model: lightseekorg/kimi-k2.7-coder-eagle3.1-mla (the K2.7-Code-matched
+# EAGLE3.1 MLA draft; trained for 4 draft tokens / 3 steps, AccLen ~2.05-2.95).
+# Overridable via DRAFT_MODEL / NUM_SPEC_TOKENS / VLLM_SPEC_CONFIG.
 #
 # Required env vars:
 #   MODEL, TP, CONC, KV_OFFLOADING, TOTAL_CPU_DRAM_GB, RESULT_DIR, DURATION, EP_SIZE
@@ -24,13 +30,23 @@ if [ -n "${ROCR_VISIBLE_DEVICES:-}" ]; then
     export HIP_VISIBLE_DEVICES="$ROCR_VISIBLE_DEVICES"
 fi
 
+# EAGLE3 draft model. Pre-stage it here rather than letting vLLM fetch it at
+# engine init: a cold HF pull mid-boot can blow the READY_TIMEOUT on slurm.
+DRAFT_MODEL="${DRAFT_MODEL:-lightseekorg/kimi-k2.7-coder-eagle3.1-mla}"
+
 if [[ -n "${MODEL_PATH:-}" ]]; then
     if [[ ! -d "$MODEL_PATH" || -z "$(ls -A "$MODEL_PATH" 2>/dev/null)" ]]; then
         hf download "$MODEL" --local-dir "$MODEL_PATH"
     fi
+    DRAFT_MODEL_PATH="${DRAFT_MODEL_PATH:-/data/models/${DRAFT_MODEL##*/}}"
+    if [[ ! -d "$DRAFT_MODEL_PATH" || -z "$(ls -A "$DRAFT_MODEL_PATH" 2>/dev/null)" ]]; then
+        hf download "$DRAFT_MODEL" --local-dir "$DRAFT_MODEL_PATH"
+    fi
 else
     hf download "$MODEL"
     export MODEL_PATH="$MODEL"
+    hf download "$DRAFT_MODEL"
+    DRAFT_MODEL_PATH="$DRAFT_MODEL"
 fi
 rocm-smi || true
 amd-smi || true
@@ -353,6 +369,12 @@ fi
 echo "Starting vllm server..."
 export PYTHONNOUSERSITE=1
 
+# EAGLE3 speculative decoding. num_speculative_tokens defaults to 3 (vLLM's
+# benchmarked EAGLE3 default; the draft is trained for 4/steps-3, so 4 is a
+# valid override to trade a longer draft against verify cost).
+NUM_SPEC_TOKENS="${NUM_SPEC_TOKENS:-3}"
+VLLM_SPEC_CONFIG="${VLLM_SPEC_CONFIG:-{\"model\":\"$DRAFT_MODEL_PATH\",\"method\":\"eagle3\",\"num_speculative_tokens\":$NUM_SPEC_TOKENS}}"
+
 { set +x; } 2>/dev/null
 VLLM_CMD=(
     vllm serve "$MODEL_PATH" --served-model-name "$MODEL"
@@ -377,6 +399,7 @@ VLLM_CMD=(
     --tool-call-parser kimi_k2
     --enable-auto-tool-choice
     --reasoning-parser kimi_k2
+    --speculative-config "$VLLM_SPEC_CONFIG"
     "${PREFIX_CACHE_ARGS[@]}"
     "${OFFLOAD_ARGS[@]}"
 )
