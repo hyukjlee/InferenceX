@@ -640,6 +640,26 @@ kimik2.7-fp4-mi355x-vllm-agentic-mtp-gbt350-smoke:
       - { tp: 8, kv-offloading: none, conc-list: [4], spec-decoding: mtp }
       - { tp: 8, kv-offloading: dram, kv-offload-backend: { name: lmcache, version: "aaf7c0d3" }, conc-list: [16], spec-decoding: mtp }
 
+# Chosen config after the 900s smoke: TP4 (best throughput-per-GPU; same output
+# tput + ITL as TP8 on half the GPUs). Full 3600s run on the local gbt350 box,
+# none c4 + LMCache c16, spec mtp. This is the candidate the standalone MTP PR
+# will record once validated.
+kimik2.7-fp4-mi355x-vllm-agentic-mtp-gbt350:
+  image: vllm/vllm-openai-rocm:v0.24.0
+  model: amd/Kimi-K2.7-Code-MXFP4
+  model-prefix: kimik2.7
+  runner: cluster:gbt350docker
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    agentic-coding:
+    - dram-utilization: 0.80
+      duration: 3600
+      search-space:
+      - { tp: 4, kv-offloading: none, conc-list: [4], spec-decoding: mtp }
+      - { tp: 4, kv-offloading: dram, kv-offload-backend: { name: lmcache, version: "aaf7c0d3" }, conc-list: [16], spec-decoding: mtp }
+
 
 kimik2.5-fp4-mi355x-atom:
   image: rocm/atom:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0_atom0.1.4_202607091539
