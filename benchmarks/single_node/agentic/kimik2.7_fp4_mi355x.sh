@@ -185,12 +185,11 @@ case "$OFFLOAD_MODE" in
         # connector does not pin a matching value, so this is self-contained.
         LMCACHE_CHUNK_SIZE="${LMCACHE_CHUNK_SIZE:-1024}"
         LMCACHE_L1_ALIGN_BYTES="${LMCACHE_L1_ALIGN_BYTES:-16384}"
-        # Split worker pools: cap the GPU-affinity pool (STORE/RETRIEVE) at 1 to
-        # avoid concurrent-GPU-transfer stalls under heavy async-load pressure
-        # (the conc64 LMCache stall class); keep 8 CPU-side workers for LOOKUP.
-        # Supersedes the old --max-workers (which set both pools equal).
-        LMCACHE_MAX_GPU_WORKERS="${LMCACHE_MAX_GPU_WORKERS:-1}"
-        LMCACHE_MAX_CPU_WORKERS="${LMCACHE_MAX_CPU_WORKERS:-8}"
+        # Worker pool: --max-gpu-workers 1 (from the reference runbook) starved
+        # KV transfer at conc16 (requests stalled -> aiperf grace-timeout exit1,
+        # ~164 vs haic0 318 tok/s). Revert to the proven single --max-workers pool
+        # (=TP*2) that haic0 ran clean; both GPU+CPU pools sized together.
+        LMCACHE_MAX_WORKERS="${LMCACHE_MAX_WORKERS:-$((TP * 2))}"
         LMCACHE_EVICTION_TRIGGER_WATERMARK="${LMCACHE_EVICTION_TRIGGER_WATERMARK:-0.85}"
         LMCACHE_EVICTION_RATIO="${LMCACHE_EVICTION_RATIO:-0.10}"
         LMCACHE_TRANSFER_MODE="${LMCACHE_TRANSFER_MODE:-lmcache_driven}"
@@ -209,8 +208,7 @@ case "$OFFLOAD_MODE" in
             --l1-read-ttl-seconds "$LMCACHE_L1_READ_TTL_SECONDS"
             --chunk-size "$LMCACHE_CHUNK_SIZE"
             --l1-align-bytes "$LMCACHE_L1_ALIGN_BYTES"
-            --max-gpu-workers "$LMCACHE_MAX_GPU_WORKERS"
-            --max-cpu-workers "$LMCACHE_MAX_CPU_WORKERS"
+            --max-workers "$LMCACHE_MAX_WORKERS"
             --eviction-trigger-watermark "$LMCACHE_EVICTION_TRIGGER_WATERMARK"
             --eviction-ratio "$LMCACHE_EVICTION_RATIO"
             --eviction-policy LRU
