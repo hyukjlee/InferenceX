@@ -365,10 +365,10 @@ VLLM_CMD=(
     --trust-remote-code
     --max-num-seqs "$CONC"
     --mm-encoder-tp-mode data
-    # MI355X (gfx950) recipe defaults from recipes.vllm.ai/moonshotai/Kimi-K2.7-Code:
-    # FlyDSL W4A16 MoE kernel + disable the fuse_allreduce_rms compile pass
-    # (required on MI350X/MI355X).
-    --moe-backend flydsl
+    # Disable the fuse_allreduce_rms compile pass (recipes.vllm.ai Kimi-K2.7-Code
+    # MI355X guidance). NOTE: --moe-backend flydsl from that page is NOT valid for
+    # the MXFP4 MoE path on vLLM v0.24.0 (ValueError: not supported for MXFP4),
+    # so we use the default MXFP4 backend (aiter, matching the proven base runs).
     --compilation-config '{"pass_config": {"fuse_allreduce_rms": false}}'
     # Structured tool-calls + reasoning for the SWE-bench agentic eval
     # (EVAL_ONLY path). Kimi-K2 emits the kimi_k2 tool-call/reasoning format;
