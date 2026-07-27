@@ -571,6 +571,26 @@ kimik2.7-fp4-mi355x-vllm-agentic:
       search-space:
       - { tp: 4, kv-offloading: none, conc-list: [1, 2, 4, 8] }
 
+# Fork-only twin of kimik2.7-fp4-mi355x-vllm-agentic, pinned to the standalone
+# m15-17 MI355X node instead of the mia1 slurm cluster. Every field below is
+# identical to the key above except `runner:` -- keep it that way, the point is
+# that the two runners execute the same env so their numbers are comparable
+# (and so a diff proves it). Never include this key in an upstream PR.
+kimik2.7-fp4-mi355x-vllm-agentic-m1517:
+  image: vllm/vllm-openai-rocm:v0.24.0
+  model: amd/Kimi-K2.7-Code-MXFP4
+  model-prefix: kimik2.7
+  runner: cluster:m1517docker
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    agentic-coding:
+    - dram-utilization: 0.80
+      duration: 3600
+      search-space:
+      - { tp: 4, kv-offloading: none, conc-list: [1, 2, 4, 8] }
+
 
 kimik2.5-fp4-mi355x-atom:
   image: rocm/atom:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0_atom0.1.4_202607091539

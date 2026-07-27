@@ -290,7 +290,15 @@ labels:
     - mi355x-amds_06
     - mi355x-amds_07
     - mi355x-amds_08
+  # Fork-only: standalone MI355X node (smci355-ccs-aus-m15-17), plain docker,
+  # no slurm. Served by runners/launch_m1517docker.sh.
+  cluster:m1517docker:
+    - m1517docker_00
 hardware:
+  # /proc/meminfo MemTotal 3_170_242_592 kB on smci355-ccs-aus-m15-17.
+  cluster:m1517docker:
+    available-cpu-dram-mib: 3_095_940
+    gpus-per-node: 8
   cluster:h100-dgxc:
     available-cpu-dram-mib: 2_063_837
     gpus-per-node: 8
