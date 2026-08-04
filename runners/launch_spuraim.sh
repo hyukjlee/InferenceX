@@ -398,10 +398,44 @@ EXCLUSIVE_ARG=()
 # There is no knob for this, so treat a non-starting job as a failed submission:
 # give it SPUR_START_TIMEOUT to reach RUNNING, then scancel and resubmit. Once
 # it is running we just wait, however long the benchmark takes.
-SPUR_START_TIMEOUT="${SPUR_START_TIMEOUT:-420}"
-SPUR_START_ATTEMPTS="${SPUR_START_ATTEMPTS:-4}"
+# DEFAULT IS OFF (0 = wait indefinitely), and that default is the important part.
+#
+# This watchdog was written on the belief that SPUR "strands" jobs, because they
+# sat PENDING with Reason=None while `sinfo -p amd-spur` showed idle nodes. That
+# reading was wrong on both halves:
+#   * Reason=None is just SPUR not populating a reason string. It does not mean
+#     the scheduler has forgotten the job.
+#   * Partition-wide idle count is NOT our entitlement. amd-spur's ~228 nodes are
+#     shared by 19 accounts (AllowAccounts on the partition), and per-team access
+#     is a fair-share/QoS cap -- the cluster docs quote figures like "Primus (16
+#     nodes)", "AIFW-DEV (19 nodes)". Idle nodes elsewhere in the partition are
+#     other teams' entitlement, not ours.
+#
+# With cancel-and-resubmit enabled, run 30889590806 burned all four attempts on a
+# job that was merely queued and then failed with exit 75. Every resubmission
+# threw away the job's accumulated queue age, which is the one thing that would
+# have got it scheduled. Waiting is strictly better than churning.
+#
+# Set SPUR_START_TIMEOUT to a positive number of seconds only to guard against a
+# genuinely hung submission; the GitHub job timeout (500 min) is the real backstop.
+SPUR_START_TIMEOUT="${SPUR_START_TIMEOUT:-0}"
+SPUR_START_ATTEMPTS="${SPUR_START_ATTEMPTS:-1}"
 
 RC=1
+if [[ "$SPUR_START_TIMEOUT" -le 0 ]]; then
+    # Plain foreground wait: queue until the scheduler gives us a slot.
+    echo "[spuraim] submitting (no start watchdog; will wait for the queue)"
+    srun -A "$SPUR_ACCOUNT" --qos="$SPUR_QOS" -p "$SPUR_PARTITION" \
+        -N1 --gres="gpu:$GPU_COUNT" -c "$SPUR_CPUS_PER_TASK" \
+        -t "$SPUR_TIME_LIMIT" -J "$JOB_NAME" \
+        "${EXCLUDE_ARG[@]}" "${EXCLUSIVE_ARG[@]}" \
+        bash "$INNER"
+    RC=$?
+    rm -f "$ENV_FILE" "$INNER"
+    echo "[spuraim] job exit=$RC"
+    exit $RC
+fi
+
 attempt=1
 while [[ $attempt -le $SPUR_START_ATTEMPTS ]]; do
     echo "[spuraim] submit attempt $attempt/$SPUR_START_ATTEMPTS (job name $JOB_NAME)"
