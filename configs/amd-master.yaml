@@ -3178,3 +3178,24 @@ kimik3-fp4-mi355x-vllm-agentic-dspark-c8-spur:
     agentic-coding:
     - search-space:
       - { tp: 8, kv-offloading: none, spec-decoding: mtp, conc-list: [8] }
+
+kimik3-fp4-mi355x-vllm-agentic-dspark-lmc-c8-spur:
+  # Identical to kimik3-fp4-mi355x-vllm-agentic-dspark-lmc-c8 except `runner:`.
+  #
+  # SPUR arm of the DSpark+LMCache functional probe that SemiAnalysisAI run
+  # 30875699986 passed on cluster:mi355x-amds at 900s. Run here at 3600s to see
+  # whether the result holds over a full-length benchmark rather than a short
+  # functional window -- the crash this model line keeps hitting tracks context
+  # depth, and 900s may simply not accumulate enough of it.
+  image: vllm/vllm-openai-rocm:kimi-k3
+  model: moonshotai/Kimi-K3
+  model-prefix: kimik3
+  runner: cluster:spuraim
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    agentic-coding:
+    - dram-utilization: 0.80
+      search-space:
+      - { tp: 8, kv-offloading: dram, kv-offload-backend: { name: lmcache-k3, version: "git" }, spec-decoding: mtp, conc-list: [8] }
