@@ -32,6 +32,26 @@ export KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-auto}"
 # per-position all 1.000), and the native MTP path imposes causal masking that
 # DSpark cannot take (acceptance 1.41-4.76 vs 6.41-8.00). Both refuted today.
 export MLA_ASM_PAD="${MLA_ASM_PAD:-0}"
+
+# DEPTH-BOUND ARM. Tests whether the GPU memory access fault is a function of
+# context depth rather than of request count or k.
+#
+# Evidence it is: at k=7 every arm died at 90-130 completions; at k=2 (which
+# caps per-step context growth at 3 tokens) fork run 30874551315 survived ~50
+# minutes and then faulted with num_computed_tokens=37686. k changed how fast
+# depth accumulated, not whether the fault happened -- which is what a
+# depth-dependent buffer or indexing bug looks like.
+#
+# 32768 sits below the ~37.7k where it faulted. Two outcomes, both useful:
+#   pass -> depth is the trigger; also gives an immediately usable (capped) K3
+#           DSpark lane while the kernel bug is chased.
+#   fail -> depth is not the trigger and the hypothesis dies cheaply.
+#
+# Guarded on "0" rather than emptiness because launch_spuraim.sh always emits
+# MAX_MODEL_LEN (as "0" when the matrix leaves it unset), so :- would not fire.
+if [ "${MAX_MODEL_LEN:-0}" = "0" ]; then
+    export MAX_MODEL_LEN=32768
+fi
 export DSPARK_ASM_VERIFY="${DSPARK_ASM_VERIFY:-0}"
 export DSPARK_MTP_NATIVE="${DSPARK_MTP_NATIVE:-0}"
 export DSPARK_MQA_FIX="${DSPARK_MQA_FIX:-1}"
