@@ -32,6 +32,21 @@ export KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-auto}"
 # per-position all 1.000), and the native MTP path imposes causal masking that
 # DSpark cannot take (acceptance 1.41-4.76 vs 6.41-8.00). Both refuted today.
 export MLA_ASM_PAD="${MLA_ASM_PAD:-0}"
+
+# DIAGNOSTIC ARM -- not a perf config. Do not merge into a measurement key.
+#
+# The GPU memory access fault this arm chases is currently unattributable: ROCm
+# launches kernels asynchronously, so by the time the fault surfaces the log has
+# moved on. In fork run 30874551315 the last line before
+#   "Memory access fault by GPU node-2 ... on address 0x76c1f9c00000"
+# was a prefill GEMM, while the scheduler dump showed a spec-decode step -- two
+# unrelated things, neither necessarily the culprit.
+#
+# AMD_SERIALIZE_KERNEL=3 serializes both launch AND completion, so the faulting
+# kernel is reported synchronously by name. Same knob codex/kimik3-dspark-isolation
+# used. It costs a large amount of throughput, which is the trade: this arm
+# exists to name a kernel, not to produce a number.
+export AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL:-3}"
 export DSPARK_ASM_VERIFY="${DSPARK_ASM_VERIFY:-0}"
 export DSPARK_MTP_NATIVE="${DSPARK_MTP_NATIVE:-0}"
 export DSPARK_MQA_FIX="${DSPARK_MQA_FIX:-1}"
