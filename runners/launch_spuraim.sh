@@ -84,7 +84,20 @@ SPUR_EXCLUDE_NODES="${SPUR_EXCLUDE_NODES-crsuse2-m2m-071}"
 # cannot be attributed, so the known-flaky cell can never be judged. Exclusive
 # removes the one variable we control. Set SPUR_EXCLUSIVE=0 to trade it back
 # for schedulability on workloads that do not need whole-node VRAM.
-SPUR_EXCLUSIVE="${SPUR_EXCLUSIVE:-1}"
+# Back to NON-exclusive, and this time on evidence rather than on convenience.
+#
+# Exclusive was made the default to remove co-tenancy as a confound after run
+# 30870535817 lost a worker. That confound has since been disproven twice: the
+# non-DSpark control (30872688837) came up and served on a shared node, and the
+# k=2 aiter arm (30874551315) failed on SPUR with the SAME 8/10 request error
+# rate and ~16s duration as the upstream mia1 arm (30873376524) on a dedicated
+# fleet. Co-tenancy is not what breaks these runs.
+#
+# Meanwhile exclusive is now a real cost: with the partition at 84 alloc / 60
+# mix / 68 resv and 67+ jobs queued, demanding a whole node means waiting, and
+# TP8 already needs all 8 GPUs so exclusivity buys almost nothing extra. Set
+# SPUR_EXCLUSIVE=1 when a run genuinely needs an uncontended node for numbers.
+SPUR_EXCLUSIVE="${SPUR_EXCLUSIVE:-0}"
 
 # Per-runner port offset (last char of runner name), same scheme as amds.
 PORT_OFFSET="${RUNNER_NAME: -1}"
@@ -168,7 +181,9 @@ if [[ "${SPEC_DECODING:-none}" == "mtp" && -z "${SPEC_DRAFT_MODEL:-}" ]]; then
         echo "[spuraim] drafter staged on shared NFS: $RESOLVED_DRAFT_PATH"
 fi
 
-JOB_NAME="ix-${RUNNER_NAME}-${EXP_NAME:-job}"
+# Unique per invocation: the start-watchdog below identifies the job with
+# `squeue -n`, so a name reused across retries would match a corpse.
+JOB_NAME="ix-${RUNNER_NAME}-$$-${EXP_NAME:-job}"
 JOB_NAME="${JOB_NAME:0:60}"
 CONTAINER="spuraim_${RUNNER_NAME}_$$"
 
@@ -369,12 +384,63 @@ fi
 EXCLUSIVE_ARG=()
 [[ "$SPUR_EXCLUSIVE" == "1" ]] && EXCLUSIVE_ARG=(--exclusive)
 
-srun -A "$SPUR_ACCOUNT" --qos="$SPUR_QOS" -p "$SPUR_PARTITION" \
-    -N1 --gres="gpu:$GPU_COUNT" -c "$SPUR_CPUS_PER_TASK" \
-    -t "$SPUR_TIME_LIMIT" -J "$JOB_NAME" \
-    "${EXCLUDE_ARG[@]}" "${EXCLUSIVE_ARG[@]}" \
-    bash "$INNER"
-RC=$?
+# ---------------------------------------------------------------------------
+# Start watchdog.
+#
+# SPUR strands jobs. Observed repeatedly on 2026-08-04: jobs 36031/36032/36084/
+# 36096 sat PENDING with Reason=None and TIME 0:00 for 35+ minutes while the
+# partition had 13 idle nodes -- and a byte-identical srun submitted by hand at
+# the same moment, same account/qos/gres/cpus/time/exclusive/arg-order/name and
+# the same Priority=1000, dispatched instantly. Submitting context was ruled out
+# too (an interactive shell and a `systemd-run --user` scope both schedule fine).
+# The srun client stays alive and connected; the job simply never runs.
+#
+# There is no knob for this, so treat a non-starting job as a failed submission:
+# give it SPUR_START_TIMEOUT to reach RUNNING, then scancel and resubmit. Once
+# it is running we just wait, however long the benchmark takes.
+SPUR_START_TIMEOUT="${SPUR_START_TIMEOUT:-420}"
+SPUR_START_ATTEMPTS="${SPUR_START_ATTEMPTS:-4}"
+
+RC=1
+attempt=1
+while [[ $attempt -le $SPUR_START_ATTEMPTS ]]; do
+    echo "[spuraim] submit attempt $attempt/$SPUR_START_ATTEMPTS (job name $JOB_NAME)"
+    srun -A "$SPUR_ACCOUNT" --qos="$SPUR_QOS" -p "$SPUR_PARTITION" \
+        -N1 --gres="gpu:$GPU_COUNT" -c "$SPUR_CPUS_PER_TASK" \
+        -t "$SPUR_TIME_LIMIT" -J "$JOB_NAME" \
+        "${EXCLUDE_ARG[@]}" "${EXCLUSIVE_ARG[@]}" \
+        bash "$INNER" &
+    SRUN_PID=$!
+
+    started=0
+    waited=0
+    while [[ $waited -lt $SPUR_START_TIMEOUT ]]; do
+        # srun gone => it either finished or failed outright; either way stop
+        # watching and let `wait` below report the real exit code.
+        kill -0 "$SRUN_PID" 2>/dev/null || { started=1; break; }
+        state="$(squeue -h -n "$JOB_NAME" -o '%T' 2>/dev/null | head -1)"
+        [[ "$state" == "RUNNING" ]] && { started=1; break; }
+        sleep 10
+        waited=$((waited + 10))
+    done
+
+    if [[ $started -eq 1 ]]; then
+        wait "$SRUN_PID"; RC=$?
+        break
+    fi
+
+    echo "[spuraim] job did not start within ${SPUR_START_TIMEOUT}s -- SPUR" \
+         "stranded it. Cancelling and resubmitting." >&2
+    scancel -n "$JOB_NAME" 2>/dev/null || true
+    kill "$SRUN_PID" 2>/dev/null || true
+    wait "$SRUN_PID" 2>/dev/null || true
+    attempt=$((attempt + 1))
+done
+
+if [[ $attempt -gt $SPUR_START_ATTEMPTS ]]; then
+    echo "[spuraim] FATAL: $SPUR_START_ATTEMPTS submissions all stranded." >&2
+    RC=75
+fi
 
 rm -f "$ENV_FILE" "$INNER"
 echo "[spuraim] job exit=$RC"
