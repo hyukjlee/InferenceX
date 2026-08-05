@@ -36,6 +36,7 @@
 # variable in that block is written to a docker --env-file below. Keep the two
 # in sync when benchmark-tmpl.yml gains a variable.
 set -uo pipefail
+umask 077
 set -x
 
 # The spur CLI finds spurctld via SPUR_CONTROLLER_ADDR, which is exported from
@@ -53,6 +54,13 @@ if [[ -z "${SPUR_CONTROLLER_ADDR:-}" ]]; then
     exit 78
 fi
 export SPUR_CONTROLLER_ADDR
+
+for required_command in srun squeue scancel python3 timeout; do
+    if ! command -v "$required_command" >/dev/null 2>&1; then
+        echo "[spuraim] FATAL: required command is unavailable: $required_command" >&2
+        exit 69
+    fi
+done
 
 SPUR_ACCOUNT="${SPUR_ACCOUNT:-amd-aifw-aim}"
 SPUR_QOS="${SPUR_QOS:-amd-aifw-aim-qos}"
@@ -181,16 +189,84 @@ if [[ "${SPEC_DECODING:-none}" == "mtp" && -z "${SPEC_DRAFT_MODEL:-}" ]]; then
         echo "[spuraim] drafter staged on shared NFS: $RESOLVED_DRAFT_PATH"
 fi
 
-# Unique per invocation: the start-watchdog below identifies the job with
-# `squeue -n`, so a name reused across retries would match a corpse.
+# Unique per invocation so lifecycle cleanup can target only this allocation.
 JOB_NAME="ix-${RUNNER_NAME}-$$-${EXP_NAME:-job}"
 JOB_NAME="${JOB_NAME:0:60}"
 CONTAINER="spuraim_${RUNNER_NAME}_$$"
 
+# Reclaim an allocation left by an earlier crash of this exact runner. This is
+# deliberately scoped by both user and runner-name prefix; it cannot touch a
+# sibling runner or another user's job.
+SPUR_JOB_PREFIX="ix-${RUNNER_NAME}-"
+mapfile -t STALE_JOB_IDS < <(
+    squeue -h -u "$(id -un)" -o '%.18i %.200j' 2>/dev/null | \
+        awk -v prefix="$SPUR_JOB_PREFIX" 'index($2, prefix) == 1 { print $1 }'
+)
+if [[ ${#STALE_JOB_IDS[@]} -gt 0 ]]; then
+    echo "[spuraim] reclaiming stale allocation(s): ${STALE_JOB_IDS[*]}"
+    scancel "${STALE_JOB_IDS[@]}" || true
+fi
+
 STAGE_DIR="$GITHUB_WORKSPACE/.spuraim"
-mkdir -p "$STAGE_DIR"
+install -d -m 700 "$STAGE_DIR" || {
+    echo "[spuraim] FATAL: cannot create private staging directory: $STAGE_DIR" >&2
+    exit 73
+}
+# A killed runner can leave these behind. Each Actions runner owns a separate
+# workspace and executes one job at a time, so anything left here is stale.
+find "$STAGE_DIR" -maxdepth 1 -type f \
+    \( -name 'env.*.list' -o -name 'inner.*.sh' -o -name 'heartbeat.*.status' \) \
+    -delete || {
+        echo "[spuraim] FATAL: cannot remove stale staging files from $STAGE_DIR" >&2
+        exit 73
+    }
 ENV_FILE="$STAGE_DIR/env.$$.list"
 INNER="$STAGE_DIR/inner.$$.sh"
+HEARTBEAT_FILE="$STAGE_DIR/heartbeat.$$.status"
+
+SPUR_HEARTBEAT_SECONDS="${SPUR_HEARTBEAT_SECONDS:-60}"
+if ! [[ "$SPUR_HEARTBEAT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[spuraim] FATAL: SPUR_HEARTBEAT_SECONDS must be a positive integer." >&2
+    exit 64
+fi
+
+MONITOR_PID=""
+SRUN_ACTIVE=0
+
+stop_monitor() {
+    if [[ -n "$MONITOR_PID" ]]; then
+        kill "$MONITOR_PID" 2>/dev/null || true
+        wait "$MONITOR_PID" 2>/dev/null || true
+        MONITOR_PID=""
+    fi
+}
+
+cleanup_outer() {
+    local rc=$?
+    trap - EXIT INT TERM
+    stop_monitor
+    if [[ "$SRUN_ACTIVE" == "1" ]]; then
+        echo "[spuraim] cancelling allocation for interrupted job $JOB_NAME" >&2
+    fi
+    # The name is unique to this invocation. This also catches the rare case
+    # where the srun client exited but SPUR kept the allocation alive.
+    scancel -n "$JOB_NAME" >/dev/null 2>&1 || true
+    rm -f "$ENV_FILE" "$INNER" "$HEARTBEAT_FILE"
+    exit "$rc"
+}
+
+handle_signal() {
+    local signal="$1"
+    echo "[spuraim] received $signal; stopping monitor and allocation" >&2
+    case "$signal" in
+        INT) exit 130 ;;
+        TERM) exit 143 ;;
+    esac
+}
+
+trap cleanup_outer EXIT
+trap 'handle_signal INT' INT
+trap 'handle_signal TERM' TERM
 
 # ---------------------------------------------------------------------------
 # docker --env-file: strict KEY=VALUE, one per line, value taken LITERALLY to
@@ -198,9 +274,42 @@ INNER="$STAGE_DIR/inner.$$.sh"
 # -- it sidesteps the quoting hell of pushing ~50 values through
 # login-shell -> srun -> bash -> docker.
 # ---------------------------------------------------------------------------
-emit_env() { printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"; }
+emit_env() {
+    local key="$1"
+    local value="$2"
+    if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        echo "[spuraim] FATAL: invalid env key: $key" >&2
+        exit 65
+    fi
+    if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+        echo "[spuraim] FATAL: env value for $key contains a newline." >&2
+        exit 65
+    fi
+    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+}
 
+compact_json_env() {
+    local key="$1"
+    local value="$2"
+    if [[ -z "$value" || "$value" == "none" || "$value" == "null" ]]; then
+        printf '%s' "$value"
+        return 0
+    fi
+    JSON_ENV_VALUE="$value" python3 -c 'import json, os
+print(json.dumps(json.loads(os.environ["JSON_ENV_VALUE"]), separators=(",", ":")))' || {
+        echo "[spuraim] FATAL: $key must contain valid JSON." >&2
+        return 65
+    }
+}
+
+# Do not xtrace secrets or metadata while constructing the env file.
+set +x
 : > "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+KV_OFFLOAD_BACKEND_METADATA_COMPACT="$(compact_json_env \
+    KV_OFFLOAD_BACKEND_METADATA "${KV_OFFLOAD_BACKEND_METADATA:-}")" || exit $?
+ROUTER_METADATA_COMPACT="$(compact_json_env \
+    ROUTER_METADATA "${ROUTER_METADATA:-}")" || exit $?
 emit_env HF_HUB_CACHE          "$CONTAINER_HF_HUB"
 emit_env HF_HOME               "$NODE_SCRATCH/hf_home"
 emit_env HF_TOKEN              "${HF_TOKEN:-}"
@@ -235,8 +344,8 @@ emit_env SCENARIO_SUBDIR       "${SCENARIO_SUBDIR:-}"
 emit_env IS_AGENTIC            "${IS_AGENTIC:-0}"
 emit_env KV_OFFLOADING         "${KV_OFFLOADING:-}"
 emit_env KV_OFFLOAD_BACKEND    "${KV_OFFLOAD_BACKEND:-}"
-emit_env KV_OFFLOAD_BACKEND_METADATA "${KV_OFFLOAD_BACKEND_METADATA:-}"
-emit_env ROUTER_METADATA       "${ROUTER_METADATA:-}"
+emit_env KV_OFFLOAD_BACKEND_METADATA "$KV_OFFLOAD_BACKEND_METADATA_COMPACT"
+emit_env ROUTER_METADATA       "$ROUTER_METADATA_COMPACT"
 emit_env KV_P2P_TRANSFER       "${KV_P2P_TRANSFER:-}"
 emit_env TOTAL_CPU_DRAM_GB     "${TOTAL_CPU_DRAM_GB:-0}"
 emit_env DURATION              "${DURATION:-3600}"
@@ -260,6 +369,7 @@ emit_env VLLM_ALLREDUCE_USE_SYMM_MEM 0
 emit_env PYTHONDONTWRITEBYTECODE "${PYTHONDONTWRITEBYTECODE:-1}"
 emit_env PYTHONPYCACHEPREFIX   "${PYTHONPYCACHEPREFIX:-/tmp/inferencex-pycache}"
 emit_env PYTHONHASHSEED        0
+set -x
 
 # ---------------------------------------------------------------------------
 # Inner script: runs ON THE WORKER. Values are baked in as shell-quoted
@@ -272,6 +382,8 @@ emit_env PYTHONHASHSEED        0
     printf 'IMAGE=%q\n'             "$IMAGE"
     printf 'CONTAINER=%q\n'         "$CONTAINER"
     printf 'ENV_FILE=%q\n'          "$ENV_FILE"
+    printf 'HEARTBEAT_FILE=%q\n'    "$HEARTBEAT_FILE"
+    printf 'HEARTBEAT_SECONDS=%q\n' "$SPUR_HEARTBEAT_SECONDS"
     printf 'WORKSPACE=%q\n'         "$GITHUB_WORKSPACE"
     printf 'BENCHMARK_SCRIPT=%q\n'  "$BENCHMARK_SCRIPT"
     printf 'SHARED_HF_ROOT=%q\n'    "$SHARED_HF_ROOT"
@@ -281,18 +393,76 @@ emit_env PYTHONHASHSEED        0
     printf 'HOST_GID=%q\n'          "$(id -g)"
     cat <<'INNER_EOF'
 set -uo pipefail
+umask 077
 set -x
 
+write_worker_heartbeat() {
+    local phase="$1"
+    local temp="${HEARTBEAT_FILE}.tmp.${BASHPID}"
+    printf '%s node=%s phase=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "$(hostname)" "$phase" > "$temp"
+    mv -f "$temp" "$HEARTBEAT_FILE"
+}
+
+HEARTBEAT_PID=""
+worker_heartbeat() {
+    set +x
+    local container_state
+    while true; do
+        if container_state="$(docker inspect --format '{{.State.Status}}' \
+                "$CONTAINER" 2>/dev/null)"; then
+            write_worker_heartbeat "container-${container_state}"
+        else
+            write_worker_heartbeat "worker-active-container-not-created"
+        fi
+        sleep "$HEARTBEAT_SECONDS"
+    done
+}
+
+cleanup_worker() {
+    local rc=$?
+    trap - EXIT INT TERM
+    if [[ -n "$HEARTBEAT_PID" ]]; then
+        kill "$HEARTBEAT_PID" 2>/dev/null || true
+        wait "$HEARTBEAT_PID" 2>/dev/null || true
+    fi
+    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+    # The benchmark container runs as root against the bind-mounted checkout.
+    # Repair ownership here (including cancellation), not only on normal return,
+    # or the next actions/checkout clean can fail with EACCES.
+    timeout 120s docker run --rm -v "$WORKSPACE":/workspace --entrypoint chown \
+        "$IMAGE" -R "${HOST_UID}:${HOST_GID}" /workspace 2>/dev/null || \
+        echo "[spuraim/worker] WARN: workspace chown failed; next checkout may need manual cleanup"
+    rm -f "$HEARTBEAT_FILE" "${HEARTBEAT_FILE}.tmp."*
+    exit "$rc"
+}
+
+handle_worker_signal() {
+    case "$1" in
+        INT) exit 130 ;;
+        TERM) exit 143 ;;
+    esac
+}
+
+trap cleanup_worker EXIT
+trap 'handle_worker_signal INT' INT
+trap 'handle_worker_signal TERM' TERM
+
+write_worker_heartbeat worker-starting
 echo "[spuraim/worker] node=$(hostname)"
 
 # Docker health is NOT uniform across this cluster -- some nodes have a dead
 # daemon even while sitting `idle`. Fail fast and legibly rather than dying
 # later inside the recipe.
-if ! docker info >/dev/null 2>&1; then
+if ! timeout 30s docker info >/dev/null 2>&1; then
+    write_worker_heartbeat docker-unavailable
     echo "[spuraim/worker] FATAL: docker daemon unreachable on $(hostname)." >&2
     echo "[spuraim/worker] Add this node to SPUR_EXCLUDE_NODES and retry." >&2
     exit 125
 fi
+write_worker_heartbeat docker-ready
+worker_heartbeat &
+HEARTBEAT_PID=$!
 
 mkdir -p "$NODE_SCRATCH/hf_home" "$NODE_SCRATCH/aiperf-cache" "$NODE_SCRATCH/vllm-cache" \
          "$CONTAINER_HF_HUB"
@@ -332,8 +502,6 @@ done
 HF_MOUNT=(-v "$SHARED_HF_ROOT:$SHARED_HF_ROOT:ro"
           -v "$CONTAINER_HF_HUB:$CONTAINER_HF_HUB")
 
-cleanup() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; }
-trap cleanup EXIT INT TERM
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 
 # No shared image cache on this cluster (no enroot squashfs equivalent), so a
@@ -363,13 +531,6 @@ docker run --rm --name "$CONTAINER" \
     "$BENCHMARK_SCRIPT"
 RC=$?
 
-# The recipe runs as root in the container and writes results/ into the
-# bind-mounted checkout. docker gives us no --container-remap-root, so the next
-# job's actions/checkout `clean: true` (non-root) would hit EACCES. Chown back.
-docker run --rm -v "$WORKSPACE":/workspace --entrypoint chown \
-    "$IMAGE" -R "${HOST_UID}:${HOST_GID}" /workspace 2>/dev/null || \
-    echo "[spuraim/worker] WARN: workspace chown failed; next checkout may need manual cleanup"
-
 echo "[spuraim/worker] recipe exit=$RC"
 exit $RC
 INNER_EOF
@@ -384,98 +545,41 @@ fi
 EXCLUSIVE_ARG=()
 [[ "$SPUR_EXCLUSIVE" == "1" ]] && EXCLUSIVE_ARG=(--exclusive)
 
-# ---------------------------------------------------------------------------
-# Start watchdog.
-#
-# SPUR strands jobs. Observed repeatedly on 2026-08-04: jobs 36031/36032/36084/
-# 36096 sat PENDING with Reason=None and TIME 0:00 for 35+ minutes while the
-# partition had 13 idle nodes -- and a byte-identical srun submitted by hand at
-# the same moment, same account/qos/gres/cpus/time/exclusive/arg-order/name and
-# the same Priority=1000, dispatched instantly. Submitting context was ruled out
-# too (an interactive shell and a `systemd-run --user` scope both schedule fine).
-# The srun client stays alive and connected; the job simply never runs.
-#
-# There is no knob for this, so treat a non-starting job as a failed submission:
-# give it SPUR_START_TIMEOUT to reach RUNNING, then scancel and resubmit. Once
-# it is running we just wait, however long the benchmark takes.
-# DEFAULT IS OFF (0 = wait indefinitely), and that default is the important part.
-#
-# This watchdog was written on the belief that SPUR "strands" jobs, because they
-# sat PENDING with Reason=None while `sinfo -p amd-spur` showed idle nodes. That
-# reading was wrong on both halves:
-#   * Reason=None is just SPUR not populating a reason string. It does not mean
-#     the scheduler has forgotten the job.
-#   * Partition-wide idle count is NOT our entitlement. amd-spur's ~228 nodes are
-#     shared by 19 accounts (AllowAccounts on the partition), and per-team access
-#     is a fair-share/QoS cap -- the cluster docs quote figures like "Primus (16
-#     nodes)", "AIFW-DEV (19 nodes)". Idle nodes elsewhere in the partition are
-#     other teams' entitlement, not ours.
-#
-# With cancel-and-resubmit enabled, run 30889590806 burned all four attempts on a
-# job that was merely queued and then failed with exit 75. Every resubmission
-# threw away the job's accumulated queue age, which is the one thing that would
-# have got it scheduled. Waiting is strictly better than churning.
-#
-# Set SPUR_START_TIMEOUT to a positive number of seconds only to guard against a
-# genuinely hung submission; the GitHub job timeout (500 min) is the real backstop.
-SPUR_START_TIMEOUT="${SPUR_START_TIMEOUT:-0}"
-SPUR_START_ATTEMPTS="${SPUR_START_ATTEMPTS:-1}"
-
-RC=1
-if [[ "$SPUR_START_TIMEOUT" -le 0 ]]; then
-    # Plain foreground wait: queue until the scheduler gives us a slot.
-    echo "[spuraim] submitting (no start watchdog; will wait for the queue)"
-    srun -A "$SPUR_ACCOUNT" --qos="$SPUR_QOS" -p "$SPUR_PARTITION" \
-        -N1 --gres="gpu:$GPU_COUNT" -c "$SPUR_CPUS_PER_TASK" \
-        -t "$SPUR_TIME_LIMIT" -J "$JOB_NAME" \
-        "${EXCLUDE_ARG[@]}" "${EXCLUSIVE_ARG[@]}" \
-        bash "$INNER"
-    RC=$?
-    rm -f "$ENV_FILE" "$INNER"
-    echo "[spuraim] job exit=$RC"
-    exit $RC
-fi
-
-attempt=1
-while [[ $attempt -le $SPUR_START_ATTEMPTS ]]; do
-    echo "[spuraim] submit attempt $attempt/$SPUR_START_ATTEMPTS (job name $JOB_NAME)"
-    srun -A "$SPUR_ACCOUNT" --qos="$SPUR_QOS" -p "$SPUR_PARTITION" \
-        -N1 --gres="gpu:$GPU_COUNT" -c "$SPUR_CPUS_PER_TASK" \
-        -t "$SPUR_TIME_LIMIT" -J "$JOB_NAME" \
-        "${EXCLUDE_ARG[@]}" "${EXCLUSIVE_ARG[@]}" \
-        bash "$INNER" &
-    SRUN_PID=$!
-
-    started=0
-    waited=0
-    while [[ $waited -lt $SPUR_START_TIMEOUT ]]; do
-        # srun gone => it either finished or failed outright; either way stop
-        # watching and let `wait` below report the real exit code.
-        kill -0 "$SRUN_PID" 2>/dev/null || { started=1; break; }
-        state="$(squeue -h -n "$JOB_NAME" -o '%T' 2>/dev/null | head -1)"
-        [[ "$state" == "RUNNING" ]] && { started=1; break; }
-        sleep 10
-        waited=$((waited + 10))
+# SPUR buffers worker output, which previously made a healthy two-hour run look
+# hung in the Actions UI. Poll scheduler state on the login node and combine it
+# with an atomic heartbeat written by the worker over shared NFS. Do not cancel
+# and resubmit PENDING jobs: AIFW-AIM queue age must be preserved.
+monitor_spur_job() {
+    set +x
+    local started_at=$SECONDS
+    local scheduler_status
+    local worker_status
+    while true; do
+        scheduler_status="$(squeue -h -n "$JOB_NAME" \
+            -o '%.18i|%.12T|%.12M|%.80R' 2>/dev/null | head -n1)"
+        [[ -n "$scheduler_status" ]] || scheduler_status="not-yet-visible"
+        if [[ -r "$HEARTBEAT_FILE" ]]; then
+            worker_status="$(<"$HEARTBEAT_FILE")"
+        else
+            worker_status="not-started"
+        fi
+        echo "[spuraim/heartbeat] wall=$((SECONDS - started_at))s" \
+             "scheduler=[$scheduler_status] worker=[$worker_status]"
+        sleep "$SPUR_HEARTBEAT_SECONDS"
     done
+}
 
-    if [[ $started -eq 1 ]]; then
-        wait "$SRUN_PID"; RC=$?
-        break
-    fi
-
-    echo "[spuraim] job did not start within ${SPUR_START_TIMEOUT}s -- SPUR" \
-         "stranded it. Cancelling and resubmitting." >&2
-    scancel -n "$JOB_NAME" 2>/dev/null || true
-    kill "$SRUN_PID" 2>/dev/null || true
-    wait "$SRUN_PID" 2>/dev/null || true
-    attempt=$((attempt + 1))
-done
-
-if [[ $attempt -gt $SPUR_START_ATTEMPTS ]]; then
-    echo "[spuraim] FATAL: $SPUR_START_ATTEMPTS submissions all stranded." >&2
-    RC=75
-fi
-
-rm -f "$ENV_FILE" "$INNER"
+echo "[spuraim] submitting $JOB_NAME; queued jobs retain their queue age"
+monitor_spur_job &
+MONITOR_PID=$!
+SRUN_ACTIVE=1
+srun -A "$SPUR_ACCOUNT" --qos="$SPUR_QOS" -p "$SPUR_PARTITION" \
+    -N1 --gres="gpu:$GPU_COUNT" -c "$SPUR_CPUS_PER_TASK" \
+    -t "$SPUR_TIME_LIMIT" -J "$JOB_NAME" \
+    "${EXCLUDE_ARG[@]}" "${EXCLUSIVE_ARG[@]}" \
+    bash "$INNER"
+RC=$?
+SRUN_ACTIVE=0
+stop_monitor
 echo "[spuraim] job exit=$RC"
 exit $RC
