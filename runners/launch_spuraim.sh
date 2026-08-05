@@ -75,28 +75,11 @@ SPUR_TIME_LIMIT="${SPUR_TIME_LIMIT:-480}"
 # SPUR_EXCLUDE_NODES= clears the denylist, unset gets the default.
 SPUR_EXCLUDE_NODES="${SPUR_EXCLUDE_NODES-crsuse2-m2m-071}"
 
-# --exclusive by DEFAULT, despite the queueing cost.
+# Non-exclusive by default, based on evidence rather than convenience.
 #
-# Started non-exclusive to avoid queueing (only ~8 of 233 nodes are ever fully
-# idle: 86 alloc, 66 mix, 64 resv). That was the wrong trade for this workload.
-# Run 30870535817 died with VllmWorker-4 killed by a signal during
-# determine_available_memory() -- the VRAM profiling run -- with no OOM kill
-# recorded on the node (memory.events oom_kill 0) and no HSA fault in the log.
-# A co-tenant holding VRAM at that instant produces exactly that, because
-# --gpu-memory-utilization 0.88 is computed against TOTAL VRAM, and the node
-# did have another user's processes on it.
-#
-# It is NOT proven that co-tenancy caused it -- kimik3-...-dspark's own comment
-# documents this same c1 cell both passing and dying on byte-identical command
-# lines upstream. That is the point: while co-tenancy is in play, a failure
-# cannot be attributed, so the known-flaky cell can never be judged. Exclusive
-# removes the one variable we control. Set SPUR_EXCLUSIVE=0 to trade it back
-# for schedulability on workloads that do not need whole-node VRAM.
-# Back to NON-exclusive, and this time on evidence rather than on convenience.
-#
-# Exclusive was made the default to remove co-tenancy as a confound after run
-# 30870535817 lost a worker. That confound has since been disproven twice: the
-# non-DSpark control (30872688837) came up and served on a shared node, and the
+# Exclusive was briefly made the default to remove co-tenancy as a confound
+# after run 30870535817 lost a worker. That confound has since been disproven
+# twice: the non-DSpark control (30872688837) came up on a shared node, and the
 # k=2 aiter arm (30874551315) failed on SPUR with the SAME 8/10 request error
 # rate and ~16s duration as the upstream mia1 arm (30873376524) on a dedicated
 # fleet. Co-tenancy is not what breaks these runs.
