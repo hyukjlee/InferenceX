@@ -1049,6 +1049,38 @@ kimik3-fp4-mi355x-vllm-agentic-mtp-asm-fp8-k3-cgcap-syn-piecewise-sweep:
       search-space:
       - { tp: 8, kv-offloading: none, conc-list: [4, 10, 14, 16], spec-decoding: mtp}
 
+kimik3-fp4-mi355x-vllm-agentic-mtp-asm-fp8-k3-cgcap-syn-piecewise-sweep-spuraim:
+  # FORK-ONLY. Same curve as ...-cgcap-syn-piecewise-sweep, moved off
+  # cluster:mi355x-amds onto the SPUR cluster so it can run on the fork's own
+  # runners (spuraim_00..03, four of them, so four cells run in parallel and
+  # the fifth queues). The ONLY intended delta from that key is `runner:` plus
+  # the added c8 cell -- keep the recipe and search-space otherwise identical.
+  #
+  # c8 IS INCLUDED HERE ON PURPOSE. Run 31176203674's 1276.30 total tok/s/GPU
+  # was measured on cluster:mi355x-amds; SPUR is a different cluster (2.75 TiB
+  # host DRAM vs 2.95 TiB, Crusoe-operated, weights served read-only off
+  # /shared_nfs). Nothing on this key is comparable to that number without a
+  # c8 cell measured here, so c8 is the anchor and the other four cells are
+  # read against it, not against 31176203674.
+  #
+  # Every caveat on the parent key still holds: same server config in all five
+  # cells via MNS_PIN=16, so this is a client concurrency curve against a fixed
+  # server; and throughput is SIMULATED by rejection_sample_method=synthetic
+  # (fixed 2.51 accepted tokens/step), so acceptance and eval on this arm are
+  # void by construction.
+  image: vllm/vllm-openai-rocm:nightly-cb8104839c141609d99f1254459ef3a4f1bd4263
+  model: moonshotai/Kimi-K3
+  model-prefix: kimik3
+  runner: cluster:spuraim
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    agentic-coding:
+    - dram-utilization: 0.80
+      search-space:
+      - { tp: 8, kv-offloading: none, conc-list: [4, 8, 10, 14, 16], spec-decoding: mtp}
+
 kimik3-fp4-mi355x-vllm-agentic-mtp-asm-k3-c8:
   # bf16 + asm + DSpark: route the multi-token VERIFY step to the PS ASM kernel.
   #
