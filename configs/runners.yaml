@@ -1,4 +1,9 @@
 labels:
+  # Fork-only: standalone gbt350-odcdh2-b05-1 (png-odc). Plain docker, no
+  # slurm, and it is an MI350X box shared with ~11 other tenants -- see the
+  # hardware entry below before reading any throughput off it.
+  cluster:gbt350docker:
+    - gbt350docker_00
   h100:
     - h100-cw_00
     - h100-cw_01
@@ -304,6 +309,13 @@ labels:
     - spuraim_02
     - spuraim_03
 hardware:
+  # gbt350-odcdh2-b05-1: 8x AMD Instinct MI350X (NOT MI355X), /proc/meminfo
+  # MemTotal 3_170_166_888 kB, 1.5 T /dev/shm. Different SKU from every other
+  # MI35x entry here, and a shared box, so treat this cluster as a
+  # functional/crash-reproduction target, never as a perf datapoint.
+  cluster:gbt350docker:
+    available-cpu-dram-mib: 3_000_000
+    gpus-per-node: 8
   cluster:h100-dgxc:
     available-cpu-dram-mib: 2_063_837
     gpus-per-node: 8
