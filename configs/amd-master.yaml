@@ -874,7 +874,7 @@ kimik3-fp4-mi355x-vllm-agentic-mtp-dspark-prepatched-syn-curve:
   image: aigmkt/kimi-k3-agentx@sha256:6eed69f39f036df3c7a61a2263159935a00a7c988a328677d502476a541c5c08
   model: moonshotai/Kimi-K3
   model-prefix: kimik3
-  runner: cluster:mi355x-amds
+  runner: cluster:spuraim
   precision: fp4
   framework: vllm
   multinode: false
