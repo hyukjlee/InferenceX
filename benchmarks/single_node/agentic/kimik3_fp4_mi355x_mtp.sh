@@ -319,11 +319,25 @@ if [ $((TP % DCP_SIZE)) -ne 0 ]; then
     exit 1
 fi
 CP_ARGS=()
-ATTN_BE_ARGS=()
 if [ "$DCP_SIZE" -gt 1 ]; then
     CP_ARGS+=(--decode-context-parallel-size "$DCP_SIZE" --dcp-comm-backend a2a)
-    ATTN_BE_ARGS+=(--attention-backend ROCM_AITER_MLA)
 fi
+
+# Pin the TARGET model's MLA backend unconditionally. Previously this was set
+# only under DCP, which left the DCP-1 cells (c1 in particular) on automatic
+# selection. Automatic selection is not simply "aiter first": rocm.py ranks
+# ROCM_AITER_MLA ahead of TRITON_MLA, but non_causal_multi_token_decode is a
+# KV-cache-GROUP property (kv_cache_interface.py MLAAttentionSpec.merge ORs it
+# over every layer in the group), so a group shared with the non-causal DSpark
+# draft only admits a backend declaring supports_non_causal_multi_token_decode
+# -- TRITON_MLA is the only ROCm MLA backend that does, so the target got
+# dragged onto it. Pinning keeps the target on aiter for its TPOT.
+#
+# The DRAFT stays on TRITON_MLA (see SPEC_ARGS above) and cannot move: in this
+# image, vllm/v1/attention/backends/mla/rocm_aiter_mla.py declares neither
+# supports_non_causal_multi_token_decode nor AiterMLABackend.supports_non_causal,
+# so mla_attention.py rejects it for the draft's non-causal group.
+ATTN_BE_ARGS=(--attention-backend ROCM_AITER_MLA)
 export VLLM_USE_DIRECT_DCP_A2A=0
 export VLLM_USE_DIRECT_DCP_Q_GATHER=0
 export VLLM_USE_DIRECT_DCP_KV_GATHER=0

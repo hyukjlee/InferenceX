@@ -243,6 +243,15 @@ labels:
     - mi355x-amds_06
     - mi355x-amds_07
     - mi355x-amds_08
+  # Fork-only bring-up lane: 8x MI355X nodes on the Crusoe SPUR cluster,
+  # partition amd-spur, reached through four self-hosted runners on the SPUR
+  # login node. Jobs are dispatched with srun by runners/launch_spuraim.sh.
+  # Numbers from here are NOT comparable to cluster:mi355x-amds.
+  cluster:spuraim:
+    - spuraim_00
+    - spuraim_01
+    - spuraim_02
+    - spuraim_03
 hardware:
   cluster:h100-dgxc:
     available-cpu-dram-mib: 2_063_837
@@ -282,4 +291,12 @@ hardware:
     gpus-per-node: 8
   cluster:mi355x-amds:
     available-cpu-dram-mib: 3_095_781
+    gpus-per-node: 8
+  # /proc/meminfo MemTotal 2_885_471_960 kB on crsuse2-m2m-071, i.e. 2_817_843
+  # MiB. Note /dev/shm on these workers is only ~1.4 TiB, and
+  # the LMCache DRAM pool is backed by shared memory -- so keep dram-utilization
+  # for this lane at or below 0.45 (~1.21 TiB) rather than the 0.60 used on
+  # cluster:mi355x-amds, which would ask for ~1.61 TiB and overflow /dev/shm.
+  cluster:spuraim:
+    available-cpu-dram-mib: 2_817_843
     gpus-per-node: 8

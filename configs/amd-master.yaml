@@ -640,6 +640,43 @@ kimik3-fp4-mi355x-vllm-agentic-mtp:
       - { tp: 8, ep: 1, dcp-size: 1, kv-offloading: dram, kv-offload-backend: { name: lmcache, version: "0.5.5.dev114+rocm7.2" }, conc-list: [4, 8, 10, 12, 14], spec-decoding: mtp }
       - { tp: 8, ep: 1, dcp-size: 8, kv-offloading: dram, kv-offload-backend: { name: lmcache, version: "0.5.5.dev114+rocm7.2" }, conc-list: [44, 48], spec-decoding: mtp }
 
+# Baseline for the target-MLA-backend pin, on the newest public ROCm nightly.
+# Two cells lifted from kimik3-fp4-mi355x-vllm-agentic-mtp above (run
+# 34332168553): its c1 no-offload arm and its c48 DCP-8 LMCache arm. Deltas:
+#
+#   image     nightly-rocm100-385dce36 (vLLM 0.28.1rc1.dev580+g385dce36b). Two
+#             things landed upstream here that the recipe used to carry itself:
+#             TritonMLAMetadataBuilder.get_cudagraph_support, which supersedes
+#             the in-container triton-mla-cudagraph patch, and the aiter MLA
+#             builder's UNIFORM_BATCH / QueryLenSupport.UNIFORM declarations.
+#   runner    cluster:spuraim (Crusoe SPUR, account amd-agentx). NOT comparable
+#             to cluster:mi355x-amds -- read these two cells against each other
+#             and against a repeat on this same lane, never across lanes.
+#   dram-util 0.45 rather than 0.60: SPUR's /dev/shm ceiling, see runners.yaml.
+#
+# The launcher change this exists to measure is the unconditional
+# --attention-backend ROCM_AITER_MLA for the TARGET model. c48 runs
+# SPEC_NUM_TOKENS=0 and already had that flag via its DCP>1 branch, so it is a
+# pure image-bump control; c1 is the cell that actually moves, because at DCP 1
+# it previously took automatic selection and the DSpark draft's non-causal KV
+# cache group pulled the target onto TRITON_MLA. The DRAFT remains on
+# TRITON_MLA in both: this image's rocm_aiter_mla.py declares neither
+# supports_non_causal_multi_token_decode nor AiterMLABackend.supports_non_causal.
+kimik3-fp4-mi355x-vllm-agentic-mtp-aitermla:
+  image: vllm/vllm-openai-rocm:nightly-rocm100-385dce36bcee42309924a5ece951a96db3dce7f2
+  model: moonshotai/Kimi-K3
+  model-prefix: kimik3
+  runner: cluster:spuraim
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    agentic-coding:
+    - dram-utilization: 0.45
+      search-space:
+      - { tp: 8, ep: 1, dcp-size: 1, kv-offloading: none, conc-list: [1], spec-decoding: mtp }
+      - { tp: 8, ep: 1, dcp-size: 8, kv-offloading: dram, kv-offload-backend: { name: lmcache, version: "0.5.5.dev114+rocm7.2" }, conc-list: [48], spec-decoding: mtp }
+
 # Kimi-K3 MXFP4 agentic-coding benchmark on MI355X via ATOM with DSpark
 # speculative decoding. Acceptance is pinned to the committed golden curve in
 # golden_al_distribution/kimik3_dspark_probabilistic_sample_method_block_rejection_sample_method.yaml
